@@ -86,3 +86,17 @@ class CandleOut(BaseModel):
     low: float
     close: float
     volume: float = 0
+
+
+class ScannerResultOut(BaseModel):
+    symbol: str
+    signal: str
+    score: int
+    grade: str
+    trend: str
+    reason: str
+    entry_price: Optional[float] = None
+    stoploss: Optional[float] = None
+    target1: Optional[float] = None
+    target2: Optional[float] = None
+    action_status: str

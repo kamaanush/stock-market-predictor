@@ -18,7 +18,21 @@ from .database import SessionLocal, get_session, initialize_database
 from .market import IST, DemoMarketData, Quote, create_market_data
 from .models import Alert, AlertEvent, ImportBatch, Instrument, PortfolioHolding, WatchlistItem
 from .notifications import send_telegram
-from .schemas import AlertEventOut, AlertInput, AlertOut, CandleOut, HoldingInput, HoldingOut, InstrumentOut, LoginRequest, QuoteOut, WatchlistCreate, WatchlistOut
+from .schemas import (
+    AlertEventOut,
+    AlertInput,
+    AlertOut,
+    CandleOut,
+    HoldingInput,
+    HoldingOut,
+    InstrumentOut,
+    LoginRequest,
+    QuoteOut,
+    ScannerResultOut,
+    WatchlistCreate,
+    WatchlistOut,
+)
+from .services.scanner import scan_symbol
 
 SCRIP_MASTER_URL = "https://margincalculator.angelone.in/OpenAPI_File/files/OpenAPIScripMaster.json"
 
@@ -373,3 +387,46 @@ async def market_socket(websocket: WebSocket) -> None:
             await asyncio.sleep(10)
     except WebSocketDisconnect:
         return
+@app.get(
+    "/api/scanner/{symbol}",
+    response_model=ScannerResultOut,
+    dependencies=[Depends(require_owner)],
+)
+async def scan_stock(
+    symbol: str,
+    interval: str = "5m",
+    session: AsyncSession = Depends(get_session),
+) -> ScannerResultOut:
+    if interval not in {"1m", "5m", "15m"}:
+        raise HTTPException(
+            status_code=422,
+            detail="Scanner interval must be 1m, 5m, or 15m",
+        )
+
+    instrument = await resolve_instrument(session, symbol)
+
+    try:
+        candles = await market().candles(
+            instrument.symbol,
+            interval,
+            instrument.token,
+        )
+
+        result = scan_symbol(
+            symbol=instrument.symbol,
+            candles=candles,
+        )
+
+        return ScannerResultOut(**result)
+
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=str(exc),
+        ) from exc
+
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Scanner failed for {symbol.upper()}: {exc}",
+        ) from exc
