@@ -11,4 +11,9 @@ coverage/
 dist/
 tmp/
 postgres-data/
+.DS_Store
+.venv/
+*.db
+*.sqlite
+*.sqlite3
 

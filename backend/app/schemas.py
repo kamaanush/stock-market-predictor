@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Optional
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -23,18 +24,18 @@ class WatchlistCreate(InstrumentOut):
 
 
 class WatchlistOut(InstrumentOut):
-    last_price: float | None = None
-    change_percent: float | None = None
+    last_price: Optional[float] = None
+    change_percent: Optional[float] = None
 
 
 class QuoteOut(BaseModel):
     symbol: str
     last_price: float
-    open: float | None = None
-    high: float | None = None
-    low: float | None = None
-    previous_close: float | None = None
-    change_percent: float | None = None
+    open: Optional[float] = None
+    high: Optional[float] = None
+    low: Optional[float] = None
+    previous_close: Optional[float] = None
+    change_percent: Optional[float] = None
     updated_at: datetime
 
 
@@ -47,10 +48,10 @@ class HoldingInput(BaseModel):
 
 
 class HoldingOut(HoldingInput):
-    current_price: float | None = None
-    market_value: float | None = None
-    unrealized_pnl: float | None = None
-    unrealized_pnl_percent: float | None = None
+    current_price: Optional[float] = None
+    market_value: Optional[float] = None
+    unrealized_pnl: Optional[float] = None
+    unrealized_pnl_percent: Optional[float] = None
 
 
 class AlertInput(BaseModel):
@@ -66,7 +67,7 @@ class AlertOut(AlertInput):
     model_config = ConfigDict(from_attributes=True)
     id: int
     active: bool
-    last_triggered_at: datetime | None = None
+    last_triggered_at: Optional[datetime] = None
 
 
 class AlertEventOut(ORMModel):

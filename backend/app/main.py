@@ -4,6 +4,7 @@ import hmac
 import io
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime
+from typing import Optional, Union
 
 import httpx
 from fastapi import Depends, FastAPI, File, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect, status
@@ -135,7 +136,7 @@ def quote_out(quote: Quote) -> QuoteOut:
     )
 
 
-async def resolve_instrument(session: AsyncSession, symbol: str) -> Instrument | WatchlistItem | PortfolioHolding:
+async def resolve_instrument(session: AsyncSession, symbol: str) -> Union[Instrument, WatchlistItem, PortfolioHolding]:
     result = await session.execute(select(Instrument).where(Instrument.symbol == symbol.upper()))
     instrument = result.scalar_one_or_none()
     if instrument:
@@ -152,7 +153,7 @@ async def resolve_instrument(session: AsyncSession, symbol: str) -> Instrument |
 
 
 @app.get("/api/health")
-async def health() -> dict[str, str | bool]:
+async def health() -> dict[str, Union[bool, str]]:
     return {"status": "ok", "market_mode": "demo" if isinstance(market(), DemoMarketData) else "smartapi", "smartapi_configured": settings.smartapi_ready, "market_warning": app.state.market_warning}
 
 

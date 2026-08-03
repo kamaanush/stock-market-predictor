@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Optional
 
 from sqlalchemy import Boolean, DateTime, Float, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.orm import Mapped, mapped_column
@@ -75,7 +76,7 @@ class Alert(Base):
     target_price: Mapped[float] = mapped_column(Float)
     delivery: Mapped[str] = mapped_column(String(16), default="BROWSER")
     active: Mapped[bool] = mapped_column(Boolean, default=True)
-    last_triggered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_triggered_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     note: Mapped[str] = mapped_column(Text, default="")
 
 

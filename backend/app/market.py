@@ -2,6 +2,7 @@ import asyncio
 import math
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from typing import Optional, Union
 
 import pyotp
 
@@ -32,7 +33,7 @@ class FifteenSecondAggregator:
     def __init__(self) -> None:
         self.candles: dict[str, dict[int, dict[str, float]]] = {}
 
-    def ingest(self, symbol: str, price: float, timestamp: datetime | None = None) -> dict[str, float]:
+    def ingest(self, symbol: str, price: float, timestamp: Optional[datetime] = None) -> dict[str, float]:
         now = (timestamp or datetime.now(IST)).astimezone(IST)
         bucket = int(now.timestamp()) // 15 * 15
         series = self.candles.setdefault(symbol, {})
@@ -140,6 +141,6 @@ class AngelOneMarketData:
         return await asyncio.to_thread(fetch)
 
 
-def create_market_data(settings: Settings) -> DemoMarketData | AngelOneMarketData:
+def create_market_data(settings: Settings) -> Union[DemoMarketData, AngelOneMarketData]:
     return AngelOneMarketData(settings) if settings.smartapi_ready else DemoMarketData()
 
