@@ -120,7 +120,7 @@ settings = get_settings()
 app.add_middleware(SessionMiddleware, secret_key=settings.session_secret or "development-only-change-me", same_site="lax", https_only=False)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://127.0.0.1:3000", "http://localhost:3000"],
+    allow_origin_regex=r"http://(localhost|127\.0\.0\.1):\d+",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -430,3 +430,53 @@ async def scan_stock(
             status_code=502,
             detail=f"Scanner failed for {symbol.upper()}: {exc}",
         ) from exc
+
+
+@app.get(
+    "/api/scanner/watchlist",
+    response_model=list[ScannerResultOut],
+    dependencies=[Depends(require_owner)],
+)
+async def scan_watchlist(
+    interval: str = "5m",
+    session: AsyncSession = Depends(get_session),
+) -> list[ScannerResultOut]:
+    if interval not in {"1m", "5m", "15m"}:
+        raise HTTPException(
+            status_code=422,
+            detail="Scanner interval must be 1m, 5m, or 15m",
+        )
+
+    items = list(
+        (
+            await session.execute(
+                select(WatchlistItem).order_by(WatchlistItem.symbol)
+            )
+        ).scalars()
+    )
+
+    results: list[ScannerResultOut] = []
+
+    for item in items:
+        try:
+            candles = await market().candles(
+                item.symbol,
+                interval,
+                item.token,
+            )
+
+            result = scan_symbol(
+                symbol=item.symbol,
+                candles=candles,
+            )
+
+            results.append(ScannerResultOut(**result))
+
+        except Exception:
+            continue
+
+    return sorted(
+        results,
+        key=lambda item: item.score,
+        reverse=True,
+    )
