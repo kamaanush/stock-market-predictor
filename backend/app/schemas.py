@@ -100,3 +100,93 @@ class ScannerResultOut(BaseModel):
     target1: Optional[float] = None
     target2: Optional[float] = None
     action_status: str
+    pattern: Optional[str] = None
+    pattern_direction: Optional[str] = None
+    pattern_confidence: Optional[int] = None
+
+class TechnicalAnalysisOut(BaseModel):
+    ema: str
+    ema_fast: float
+    ema_slow: float
+
+    supertrend: str
+    supertrend_value: float
+
+    adx: float
+    plus_di: float
+    minus_di: float
+    trend_strength: str
+
+    rsi: float
+    macd: str
+    macd_value: float
+    macd_signal: float
+
+    vwap: str
+    vwap_value: float
+
+    volume: str
+    volume_value: float
+    average_volume: float
+
+    atr: float
+
+    pattern: Optional[str] = None
+    pattern_direction: Optional[str] = None
+    pattern_confidence: Optional[int] = None
+
+
+class TradePlanOut(BaseModel):
+    entry: Optional[float] = None
+    stoploss: Optional[float] = None
+    target1: Optional[float] = None
+    target2: Optional[float] = None
+    risk_reward: Optional[str] = None
+
+
+class AnalysisOut(BaseModel):
+    engine: str
+    confidence: int
+    probability_label: str
+    risk_label: str
+    summary: str
+
+
+class ExecutionOut(BaseModel):
+    status: str
+    timeframe: str
+    last_price: float
+
+class AIAnalysisOut(BaseModel):
+    engine: str
+    market_bias: str
+    trend_analysis: str
+    momentum_analysis: str
+    volume_analysis: str
+    risk_analysis: str
+    recommendation: str
+    overall_summary: str
+
+class CPRAnalysisOut(BaseModel):
+    pivot: float
+    top_central: float
+    bottom_central: float
+    width: float
+    width_percent: float
+    classification: str
+    position: str
+
+class ScannerV2Out(BaseModel):
+    symbol: str
+    signal: str
+    score: int
+    grade: str
+    trend: str
+    reason: str
+
+    technical_analysis: TechnicalAnalysisOut
+    cpr: CPRAnalysisOut
+    trade_plan: TradePlanOut
+    analysis: AnalysisOut
+    ai_analysis: AIAnalysisOut
+    execution: ExecutionOut

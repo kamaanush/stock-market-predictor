@@ -29,10 +29,14 @@ from .schemas import (
     LoginRequest,
     QuoteOut,
     ScannerResultOut,
+    ScannerV2Out,
     WatchlistCreate,
     WatchlistOut,
 )
 from .services.scanner import scan_symbol
+from .services.scanner_v2 import (
+    build_scanner_v2_response,
+)
 
 SCRIP_MASTER_URL = "https://margincalculator.angelone.in/OpenAPI_File/files/OpenAPIScripMaster.json"
 
@@ -266,6 +270,232 @@ async def get_quote(symbol: str, session: AsyncSession = Depends(get_session)) -
     instrument = await resolve_instrument(session, symbol)
     return quote_out(await market().quote(instrument.symbol, instrument.token))
 
+@app.get(
+    "/api/v2/scanner/{symbol}",
+    response_model=ScannerV2Out,
+    dependencies=[Depends(require_owner)],
+)
+async def scan_stock_v2(
+    symbol: str,
+    interval: str = "5m",
+    session: AsyncSession = Depends(get_session),
+) -> ScannerV2Out:
+    if interval not in {"1m", "5m", "15m"}:
+        raise HTTPException(
+            status_code=422,
+            detail="Scanner interval must be 1m, 5m, or 15m",
+        )
+
+    instrument = await resolve_instrument(
+        session,
+        symbol,
+    )
+
+    try:
+        candles = await market().candles(
+            instrument.symbol,
+            interval,
+            instrument.token,
+        )
+
+        result = scan_symbol(
+            symbol=instrument.symbol,
+            candles=candles,
+        )
+
+        return build_scanner_v2_response(
+         result=result,
+         interval=interval,
+        )
+
+
+        ema_status = (
+            "BUY"
+            if result["ema_fast"] > result["ema_slow"]
+            else "SELL"
+            if result["ema_fast"] < result["ema_slow"]
+            else "NEUTRAL"
+        )
+
+        supertrend_status = (
+            "BUY"
+            if result["supertrend_direction"]
+            else "SELL"
+        )
+
+        macd_status = (
+            "BUY"
+            if result["macd"] > result["macd_signal"]
+            else "SELL"
+            if result["macd"] < result["macd_signal"]
+            else "NEUTRAL"
+        )
+
+        vwap_status = (
+            "ABOVE"
+            if result["last_price"] > result["vwap"]
+            else "BELOW"
+            if result["last_price"] < result["vwap"]
+            else "AT VWAP"
+        )
+
+        high_volume = (
+            result["average_volume"] > 0
+            and result["volume"]
+            >= result["average_volume"] * 1.2
+        )
+
+        volume_status = (
+            "HIGH"
+            if high_volume
+            else "NORMAL"
+        )
+
+        adx = result["adx"]
+
+        if adx >= 25:
+            trend_strength = "STRONG"
+        elif adx >= 20:
+            trend_strength = "DEVELOPING"
+        else:
+            trend_strength = "WEAK"
+
+        entry = result.get("entry_price")
+        stoploss = result.get("stoploss")
+        target2 = result.get("target2")
+
+        risk_reward = None
+
+        if (
+            entry is not None
+            and stoploss is not None
+            and target2 is not None
+        ):
+            risk = abs(entry - stoploss)
+            reward = abs(target2 - entry)
+
+            if risk > 0:
+                risk_reward = (
+                    f"1:{round(reward / risk, 2)}"
+                )
+
+        score = int(result["score"])
+
+        if score >= 90:
+            probability_label = "VERY HIGH"
+        elif score >= 80:
+            probability_label = "HIGH"
+        elif score >= 70:
+            probability_label = "MODERATE"
+        else:
+            probability_label = "LOW"
+
+        if trend_strength == "WEAK":
+            risk_label = "HIGH"
+        elif result["action_status"] in {
+            "EXTENDED",
+            "AVOID",
+        }:
+            risk_label = "HIGH"
+        elif result["action_status"] in {
+            "WAIT BREAKOUT",
+            "WAIT BREAKDOWN",
+        }:
+            risk_label = "MEDIUM"
+        else:
+            risk_label = "LOW"
+
+        summary = (
+            f"{result['signal']} setup with "
+            f"{trend_strength.lower()} trend strength. "
+            f"Current status is "
+            f"{result['action_status']}."
+        )
+
+        return ScannerV2Out(
+            symbol=result["symbol"],
+            signal=result["signal"],
+            score=score,
+            grade=result["grade"],
+            trend=result["trend"],
+            reason=result["reason"],
+
+            technical_analysis={
+                "ema": ema_status,
+                "ema_fast": result["ema_fast"],
+                "ema_slow": result["ema_slow"],
+
+                "supertrend": supertrend_status,
+                "supertrend_value": result["supertrend"],
+
+                "adx": result["adx"],
+                "plus_di": result["plus_di"],
+                "minus_di": result["minus_di"],
+                "trend_strength": trend_strength,
+
+                "rsi": result["rsi"],
+
+                "macd": macd_status,
+                "macd_value": result["macd"],
+                "macd_signal": result["macd_signal"],
+
+                "vwap": vwap_status,
+                "vwap_value": result["vwap"],
+
+                "volume": volume_status,
+                "volume_value": result["volume"],
+                "average_volume": result[
+                    "average_volume"
+                ],
+
+                "atr": result["atr"],
+
+                "pattern": result.get("pattern"),
+                "pattern_direction": result.get(
+                    "pattern_direction"
+                ),
+                "pattern_confidence": result.get(
+                    "pattern_confidence"
+                ),
+            },
+
+            trade_plan={
+                "entry": result.get("entry_price"),
+                "stoploss": result.get("stoploss"),
+                "target1": result.get("target1"),
+                "target2": result.get("target2"),
+                "risk_reward": risk_reward,
+            },
+
+            analysis={
+                "engine": "RULE_ENGINE_V2",
+                "confidence": score,
+                "probability_label": probability_label,
+                "risk_label": risk_label,
+                "summary": summary,
+            },
+
+            execution={
+                "status": result["action_status"],
+                "timeframe": interval,
+                "last_price": result["last_price"],
+            },
+        )
+
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=str(exc),
+        ) from exc
+
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                f"V2 scanner failed for "
+                f"{symbol.upper()}: {exc}"
+            ),
+        ) from exc
 
 @app.get("/api/stocks/{symbol}/candles", response_model=list[CandleOut], dependencies=[Depends(require_owner)])
 async def get_candles(symbol: str, interval: str = "5m", session: AsyncSession = Depends(get_session)) -> list[dict[str, float]]:
