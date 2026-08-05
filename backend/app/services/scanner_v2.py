@@ -338,13 +338,11 @@ def build_scanner_v2_response(
                 )
             ),
             "position": str(
-                result.get(
-                    "pivot_position",
-                    "UNKNOWN",
-                )
+                 result.get("pivot_position")
+                     or "UNKNOWN"
             ),
         },
-        
+
         trade_plan={
             "entry": entry,
             "stoploss": stoploss,
