@@ -4,13 +4,17 @@ from typing import Any
 
 from ..schemas import ScannerV2Out
 from .ai_explainer import build_ai_explanation
-from .decision_engine import evaluate_decision
+from .pipeline_service import build_pipeline_analysis
 
 
 def build_scanner_v2_response(
     result: dict[str, Any],
     interval: str,
 ) -> ScannerV2Out:
+    # ---------------------------------------------------------
+    # RAW INDICATOR VALUES
+    # ---------------------------------------------------------
+
     ema_fast = float(
         result.get("ema_fast", 0)
     )
@@ -44,7 +48,10 @@ def build_scanner_v2_response(
     )
 
     average_volume = float(
-        result.get("average_volume", 0)
+        result.get(
+            "average_volume",
+            0,
+        )
     )
 
     adx = float(
@@ -64,10 +71,15 @@ def build_scanner_v2_response(
     )
 
     supertrend_value = float(
-        result.get("supertrend", 0)
+        result.get(
+            "supertrend",
+            0,
+        )
     )
 
-    pattern = result.get("pattern")
+    pattern = result.get(
+        "pattern"
+    )
 
     pattern_direction = result.get(
         "pattern_direction"
@@ -81,12 +93,9 @@ def build_scanner_v2_response(
         "pivot_position"
     )
 
-    action_status = str(
-        result.get(
-            "action_status",
-            "AVOID",
-        )
-    )
+    # ---------------------------------------------------------
+    # TECHNICAL STATUS
+    # ---------------------------------------------------------
 
     ema_status = (
         "BUY"
@@ -135,25 +144,61 @@ def build_scanner_v2_response(
         else "NORMAL"
     )
 
-    decision = evaluate_decision(
-        ema_status=ema_status,
-        supertrend_status=supertrend_status,
-        adx=adx,
-        plus_di=plus_di,
-        minus_di=minus_di,
-        rsi=rsi,
-        macd_status=macd_status,
-        vwap_status=vwap_status,
-        volume_status=volume_status,
-        pivot_position=pivot_position,
-        pattern_direction=pattern_direction,
-        action_status=action_status,
+    # ---------------------------------------------------------
+    # DECISION PIPELINE V2
+    # ---------------------------------------------------------
+
+    pipeline = build_pipeline_analysis(
+        result
     )
 
-    entry = result.get("entry_price")
-    stoploss = result.get("stoploss")
-    target1 = result.get("target1")
-    target2 = result.get("target2")
+    decision = pipeline[
+        "decision"
+    ]
+
+    market = pipeline[
+        "market_structure"
+    ]
+
+    trend = pipeline[
+        "trend_strength"
+    ]
+
+    momentum = pipeline[
+        "momentum"
+    ]
+
+    participation = pipeline[
+        "participation"
+    ]
+
+    location = pipeline[
+        "location"
+    ]
+
+    risk_analysis = pipeline[
+        "risk"
+    ]
+
+    # ---------------------------------------------------------
+    # TRADE PLAN
+    # ---------------------------------------------------------
+
+    entry = result.get(
+        "entry_price"
+    )
+
+    stoploss = result.get(
+        "stoploss"
+    )
+
+    target1 = result.get(
+        "target1"
+    )
+
+    target2 = result.get(
+        "target2"
+    )
 
     risk_reward = None
 
@@ -162,100 +207,206 @@ def build_scanner_v2_response(
         and stoploss is not None
         and target2 is not None
     ):
-        risk = abs(
+        risk_amount = abs(
             float(entry)
             - float(stoploss)
         )
 
-        reward = abs(
+        reward_amount = abs(
             float(target2)
             - float(entry)
         )
 
-        if risk > 0:
-            risk_reward = (
-                f"1:{round(reward / risk, 2)}"
-            )
+        if risk_amount > 0:
+            ratio = round(
+             reward_amount / risk_amount,
+              2,
+    )
 
-    if decision.confidence >= 90:
-        probability_label = "VERY HIGH"
+    risk_reward = f"1:{ratio}"
 
-    elif decision.confidence >= 80:
-        probability_label = "HIGH"
+    # ---------------------------------------------------------
+    # CONFIDENCE
+    # ---------------------------------------------------------
 
-    elif decision.confidence >= 70:
-        probability_label = "MODERATE"
+    confidence = int(
+        decision.get(
+            "confidence",
+            0,
+        )
+    )
+
+    if confidence >= 90:
+        probability_label = (
+            "VERY HIGH"
+        )
+
+    elif confidence >= 80:
+        probability_label = (
+            "HIGH"
+        )
+
+    elif confidence >= 70:
+        probability_label = (
+            "MODERATE"
+        )
 
     else:
-        probability_label = "LOW"
+        probability_label = (
+            "LOW"
+        )
 
-    ai_explanation = build_ai_explanation(
-        symbol=str(result["symbol"]),
-        signal=decision.signal,
-        confidence=decision.confidence,
-        ema_status=ema_status,
-        supertrend_status=supertrend_status,
-        adx=adx,
-        plus_di=plus_di,
-        minus_di=minus_di,
-        rsi=rsi,
-        macd_status=macd_status,
-        vwap_status=vwap_status,
-        volume_status=volume_status,
-        trend_strength=decision.trend_strength,
-        action_status=decision.action_status,
-        entry=(
-            float(entry)
-            if entry is not None
-            else None
-        ),
-        stoploss=(
-            float(stoploss)
-            if stoploss is not None
-            else None
-        ),
-        target1=(
-            float(target1)
-            if target1 is not None
-            else None
-        ),
-        target2=(
-            float(target2)
-            if target2 is not None
-            else None
-        ),
-        pattern=(
-            str(pattern)
-            if pattern is not None
-            else None
-        ),
-        pattern_direction=(
-            str(pattern_direction)
-            if pattern_direction is not None
-            else None
-        ),
-        pivot_position=(
-            str(pivot_position)
-            if pivot_position is not None
-            else None
-        ),
+    final_signal = str(
+        decision.get(
+            "signal",
+            "WAIT",
+        )
     )
+
+    final_grade = str(
+        decision.get(
+            "grade",
+            "AVOID",
+        )
+    )
+
+    final_action = str(
+        decision.get(
+            "action",
+            "NO TRADE",
+        )
+    )
+
+    trend_classification = str(
+        trend.get(
+            "classification",
+            "WEAK",
+        )
+    )
+
+    risk_level = str(
+        risk_analysis.get(
+            "level",
+            "HIGH",
+        )
+    )
+
+    # ---------------------------------------------------------
+    # AI EXPLANATION
+    # ---------------------------------------------------------
+
+    ai_explanation = (
+        build_ai_explanation(
+            symbol=str(
+                result["symbol"]
+            ),
+
+            signal=final_signal,
+
+            confidence=confidence,
+
+            ema_status=ema_status,
+
+            supertrend_status=(
+                supertrend_status
+            ),
+
+            adx=adx,
+
+            plus_di=plus_di,
+
+            minus_di=minus_di,
+
+            rsi=rsi,
+
+            macd_status=macd_status,
+
+            vwap_status=vwap_status,
+
+            volume_status=(
+                volume_status
+            ),
+
+            trend_strength=(
+                trend_classification
+            ),
+
+            action_status=(
+                final_action
+            ),
+
+            entry=(
+                float(entry)
+                if entry is not None
+                else None
+            ),
+
+            stoploss=(
+                float(stoploss)
+                if stoploss is not None
+                else None
+            ),
+
+            target1=(
+                float(target1)
+                if target1 is not None
+                else None
+            ),
+
+            target2=(
+                float(target2)
+                if target2 is not None
+                else None
+            ),
+
+            pattern=(
+                str(pattern)
+                if pattern is not None
+                else None
+            ),
+
+            pattern_direction=(
+                str(
+                    pattern_direction
+                )
+                if pattern_direction
+                is not None
+                else None
+            ),
+
+            pivot_position=(
+                str(
+                    pivot_position
+                )
+                if pivot_position
+                is not None
+                else None
+            ),
+        )
+    )
+
+    # ---------------------------------------------------------
+    # API RESPONSE
+    # ---------------------------------------------------------
 
     return ScannerV2Out(
         symbol=str(
             result["symbol"]
         ),
 
-        signal=decision.signal,
+        signal=final_signal,
 
-        score=decision.confidence,
+        score=confidence,
 
-        grade=decision.grade,
+        grade=final_grade,
 
         trend=str(
-            result.get(
-                "trend",
-                "SIDEWAYS",
+            market.get(
+                "bias",
+                result.get(
+                    "trend",
+                    "SIDEWAYS",
+                ),
             )
         ),
 
@@ -266,42 +417,80 @@ def build_scanner_v2_response(
             )
         ),
 
-        technical_analysis={
-            "ema": ema_status,
-            "ema_fast": ema_fast,
-            "ema_slow": ema_slow,
+        # -----------------------------------------------------
+        # TECHNICAL ANALYSIS
+        # -----------------------------------------------------
 
-            "supertrend": supertrend_status,
+        technical_analysis={
+            "ema": (
+                ema_status
+            ),
+
+            "ema_fast": (
+                ema_fast
+            ),
+
+            "ema_slow": (
+                ema_slow
+            ),
+
+            "supertrend": (
+                supertrend_status
+            ),
+
             "supertrend_value": (
                 supertrend_value
             ),
 
             "adx": adx,
+
             "plus_di": plus_di,
+
             "minus_di": minus_di,
 
             "trend_strength": (
-                decision.trend_strength
+                trend_classification
             ),
 
             "rsi": rsi,
 
-            "macd": macd_status,
-            "macd_value": macd_value,
-            "macd_signal": macd_signal,
+            "macd": (
+                macd_status
+            ),
 
-            "vwap": vwap_status,
-            "vwap_value": vwap_value,
+            "macd_value": (
+                macd_value
+            ),
 
-            "volume": volume_status,
-            "volume_value": volume_value,
+            "macd_signal": (
+                macd_signal
+            ),
+
+            "vwap": (
+                vwap_status
+            ),
+
+            "vwap_value": (
+                vwap_value
+            ),
+
+            "volume": (
+                volume_status
+            ),
+
+            "volume_value": (
+                volume_value
+            ),
+
             "average_volume": (
                 average_volume
             ),
 
             "atr": atr,
 
-            "pattern": pattern,
+            "pattern": (
+                pattern
+            ),
 
             "pattern_direction": (
                 pattern_direction
@@ -311,53 +500,99 @@ def build_scanner_v2_response(
                 pattern_confidence
             ),
         },
-        
-                cpr={
+
+        # -----------------------------------------------------
+        # CPR
+        # -----------------------------------------------------
+
+        cpr={
             "pivot": float(
-                result.get("pivot", 0)
+                result.get(
+                    "pivot",
+                    0,
+                )
             ),
+
             "top_central": float(
-                result.get("cpr_top", 0)
+                result.get(
+                    "cpr_top",
+                    0,
+                )
             ),
+
             "bottom_central": float(
-                result.get("cpr_bottom", 0)
+                result.get(
+                    "cpr_bottom",
+                    0,
+                )
             ),
+
             "width": float(
-                result.get("cpr_width", 0)
+                result.get(
+                    "cpr_width",
+                    0,
+                )
             ),
+
             "width_percent": float(
                 result.get(
                     "cpr_width_percent",
                     0,
                 )
             ),
+
             "classification": str(
                 result.get(
                     "cpr_classification",
                     "UNKNOWN",
                 )
             ),
+
             "position": str(
-                 result.get("pivot_position")
-                     or "UNKNOWN"
+                result.get(
+                    "pivot_position"
+                )
+                or "UNKNOWN"
             ),
         },
 
+        # -----------------------------------------------------
+        # TRADE PLAN
+        # -----------------------------------------------------
+
         trade_plan={
-            "entry": entry,
-            "stoploss": stoploss,
-            "target1": target1,
-            "target2": target2,
-            "risk_reward": risk_reward,
+            "entry": (
+                entry
+            ),
+
+            "stoploss": (
+                stoploss
+            ),
+
+            "target1": (
+                target1
+            ),
+
+            "target2": (
+                target2
+            ),
+
+            "risk_reward": (
+                risk_reward
+            ),
         },
+
+        # -----------------------------------------------------
+        # FINAL DECISION
+        # -----------------------------------------------------
 
         analysis={
             "engine": (
-                "DECISION_ENGINE_V1"
+                "DECISION_PIPELINE_V2"
             ),
 
             "confidence": (
-                decision.confidence
+                confidence
             ),
 
             "probability_label": (
@@ -365,13 +600,50 @@ def build_scanner_v2_response(
             ),
 
             "risk_label": (
-                decision.risk_level
+                risk_level
             ),
 
-            "summary": (
-                decision.summary
+            "summary": str(
+                decision.get(
+                    "summary",
+                    "",
+                )
             ),
         },
+
+        # -----------------------------------------------------
+        # FULL DECISION PIPELINE
+        # -----------------------------------------------------
+
+        pipeline={
+            "market_structure": (
+                market
+            ),
+
+            "trend_strength": (
+                trend
+            ),
+
+            "momentum": (
+                momentum
+            ),
+
+            "participation": (
+                participation
+            ),
+
+            "location": (
+                location
+            ),
+
+            "risk": (
+                risk_analysis
+            ),
+        },
+
+        # -----------------------------------------------------
+        # AI ANALYSIS
+        # -----------------------------------------------------
 
         ai_analysis={
             "engine": (
@@ -383,37 +655,51 @@ def build_scanner_v2_response(
             ),
 
             "trend_analysis": (
-                ai_explanation.trend_analysis
+                ai_explanation
+                .trend_analysis
             ),
 
             "momentum_analysis": (
-                ai_explanation.momentum_analysis
+                ai_explanation
+                .momentum_analysis
             ),
 
             "volume_analysis": (
-                ai_explanation.volume_analysis
+                ai_explanation
+                .volume_analysis
             ),
 
             "risk_analysis": (
-                ai_explanation.risk_analysis
+                ai_explanation
+                .risk_analysis
             ),
 
             "recommendation": (
-                ai_explanation.recommendation
+                ai_explanation
+                .recommendation
             ),
 
             "overall_summary": (
-                ai_explanation.overall_summary
+                ai_explanation
+                .overall_summary
             ),
         },
 
+        # -----------------------------------------------------
+        # EXECUTION
+        # -----------------------------------------------------
+
         execution={
             "status": (
-                decision.action_status
+                final_action
             ),
 
-            "timeframe": interval,
+            "timeframe": (
+                interval
+            ),
 
-            "last_price": last_price,
+            "last_price": (
+                last_price
+            ),
         },
     )
