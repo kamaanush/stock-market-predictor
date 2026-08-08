@@ -18,13 +18,21 @@ class MultiTimeframeResult:
     signal: str
     confidence: int
     alignment: str
+
     bullish_count: int
     bearish_count: int
     wait_count: int
+
     total_timeframes: int
+
     strongest_timeframe: str
+
     summary: str
-    timeframes: tuple[TimeframeSignal, ...]
+
+    timeframes: tuple[
+        TimeframeSignal,
+        ...
+    ]
 
 
 TIMEFRAME_WEIGHTS = {
@@ -41,14 +49,19 @@ def clamp(
 ) -> int:
     return max(
         minimum,
-        min(maximum, value),
+        min(
+            maximum,
+            value,
+        ),
     )
 
 
 def normalize_signal(
     value: Any,
 ) -> str:
-    signal = str(value or "WAIT").upper()
+    signal = str(
+        value or "WAIT"
+    ).upper()
 
     if signal not in {
         "BUY",
@@ -60,14 +73,37 @@ def normalize_signal(
     return signal
 
 
+def confidence_to_grade(
+    confidence: int,
+) -> str:
+    if confidence >= 90:
+        return "A+"
+
+    if confidence >= 85:
+        return "A"
+
+    if confidence >= 75:
+        return "B"
+
+    if confidence >= 65:
+        return "C"
+
+    return "AVOID"
+
+
 def build_timeframe_signal(
     *,
     timeframe: str,
     result: dict[str, Any],
 ) -> TimeframeSignal:
+
+    # ---------------------------------------------------------
+    # SIGNAL STILL COMES FROM DECISION ENGINE
+    # ---------------------------------------------------------
+
     decision = result.get(
         "decision",
-        result,
+        {},
     )
 
     signal = normalize_signal(
@@ -80,29 +116,48 @@ def build_timeframe_signal(
         )
     )
 
+    # ---------------------------------------------------------
+    # CONFIDENCE NOW COMES FROM MASTER CONFIDENCE ENGINE
+    # ---------------------------------------------------------
+
+    master_confidence = result.get(
+        "confidence",
+        {},
+    )
+
     confidence = int(
-        decision.get(
+        master_confidence.get(
             "confidence",
-            result.get(
-                "score",
-                0,
+            decision.get(
+                "confidence",
+                result.get(
+                    "score",
+                    0,
+                ),
             ),
         )
     )
 
     grade = str(
-        decision.get(
+        master_confidence.get(
             "grade",
-            result.get(
+            decision.get(
                 "grade",
-                "AVOID",
+                result.get(
+                    "grade",
+                    "AVOID",
+                ),
             ),
         )
     )
 
+    # ---------------------------------------------------------
+    # TREND
+    # ---------------------------------------------------------
+
     market_structure = result.get(
         "market_structure",
-        {}
+        {},
     )
 
     trend = str(
@@ -130,12 +185,19 @@ def evaluate_multi_timeframe(
         dict[str, Any],
     ],
 ) -> MultiTimeframeResult:
+
     if not timeframe_results:
         raise ValueError(
             "At least one timeframe result is required"
         )
 
-    signals: list[TimeframeSignal] = []
+    signals: list[
+        TimeframeSignal
+    ] = []
+
+    # ---------------------------------------------------------
+    # BUILD NORMALIZED TIMEFRAME RESULTS
+    # ---------------------------------------------------------
 
     for timeframe in [
         "1m",
@@ -159,6 +221,10 @@ def evaluate_multi_timeframe(
             "No supported timeframe results were provided"
         )
 
+    # ---------------------------------------------------------
+    # COUNTS
+    # ---------------------------------------------------------
+
     bullish_count = sum(
         1
         for item in signals
@@ -177,8 +243,14 @@ def evaluate_multi_timeframe(
         if item.signal == "WAIT"
     )
 
+    # ---------------------------------------------------------
+    # WEIGHTED MULTI-TIMEFRAME DIRECTION
+    # ---------------------------------------------------------
+
     weighted_direction = 0.0
+
     weighted_confidence = 0.0
+
     total_weight = 0.0
 
     strongest = signals[0]
@@ -191,14 +263,26 @@ def evaluate_multi_timeframe(
 
         total_weight += weight
 
+        # Direction is based on timeframe importance.
+        #
+        # 1m  = timing
+        # 5m  = primary intraday setup
+        # 15m = larger intraday context
+
         if item.signal == "BUY":
-            weighted_direction += weight
+            weighted_direction += (
+                weight
+            )
 
         elif item.signal == "SELL":
-            weighted_direction -= weight
+            weighted_direction -= (
+                weight
+            )
 
+        # Master confidence is now used here.
         weighted_confidence += (
-            item.confidence * weight
+            item.confidence
+            * weight
         )
 
         if (
@@ -222,6 +306,10 @@ def evaluate_multi_timeframe(
         / total_weight
     )
 
+    # ---------------------------------------------------------
+    # FINAL DIRECTION
+    # ---------------------------------------------------------
+
     if direction_score >= 0.45:
         signal = "BUY"
 
@@ -231,7 +319,13 @@ def evaluate_multi_timeframe(
     else:
         signal = "WAIT"
 
-    total = len(signals)
+    # ---------------------------------------------------------
+    # ALIGNMENT
+    # ---------------------------------------------------------
+
+    total = len(
+        signals
+    )
 
     dominant_count = max(
         bullish_count,
@@ -240,7 +334,8 @@ def evaluate_multi_timeframe(
     )
 
     alignment_ratio = (
-        dominant_count / total
+        dominant_count
+        / total
     )
 
     if alignment_ratio == 1:
@@ -255,7 +350,18 @@ def evaluate_multi_timeframe(
     else:
         alignment = "MIXED"
 
-    confidence = average_confidence
+    # ---------------------------------------------------------
+    # MASTER MULTI-TIMEFRAME CONFIDENCE
+    # ---------------------------------------------------------
+
+    confidence = (
+        average_confidence
+    )
+
+    # Only a small alignment adjustment.
+    #
+    # We do NOT want alignment bonuses to overpower
+    # the actual confidence engines.
 
     if alignment == "FULL":
         confidence += 5
@@ -264,14 +370,65 @@ def evaluate_multi_timeframe(
         confidence += 2
 
     elif alignment == "MIXED":
-        confidence -= 10
+        confidence -= 5
+
+    # ---------------------------------------------------------
+    # HIGHER-TIMEFRAME CONFLICT PENALTY
+    # ---------------------------------------------------------
+
+    fifteen_minute = next(
+        (
+            item
+            for item in signals
+            if item.timeframe
+            == "15m"
+        ),
+        None,
+    )
+
+    if fifteen_minute is not None:
+
+        if (
+            signal == "BUY"
+            and fifteen_minute.signal
+            == "SELL"
+        ):
+            confidence -= 12
+
+        elif (
+            signal == "SELL"
+            and fifteen_minute.signal
+            == "BUY"
+        ):
+            confidence -= 12
+
+        elif (
+            signal
+            in {
+                "BUY",
+                "SELL",
+            }
+            and fifteen_minute.signal
+            == "WAIT"
+        ):
+            confidence -= 3
+
+    # ---------------------------------------------------------
+    # WAIT PENALTY
+    # ---------------------------------------------------------
 
     if signal == "WAIT":
-        confidence -= 8
+        confidence -= 5
 
     confidence = clamp(
-        round(confidence),
+        round(
+            confidence
+        )
     )
+
+    # ---------------------------------------------------------
+    # SUMMARY
+    # ---------------------------------------------------------
 
     timeframe_text = ", ".join(
         (
@@ -283,28 +440,49 @@ def evaluate_multi_timeframe(
     )
 
     summary = (
-        f"Multi-timeframe signal is {signal} "
-        f"with {alignment.lower()} alignment. "
+        f"Multi-timeframe signal is "
+        f"{signal} with "
+        f"{alignment.lower()} alignment. "
         f"{bullish_count} bullish, "
         f"{bearish_count} bearish and "
         f"{wait_count} neutral timeframe(s). "
+        f"Master confidence is "
+        f"{confidence}/100. "
         f"Strongest timeframe is "
         f"{strongest.timeframe} at "
         f"{strongest.confidence} confidence. "
-        f"Timeframes: {timeframe_text}."
+        f"Timeframes: "
+        f"{timeframe_text}."
     )
 
     return MultiTimeframeResult(
         signal=signal,
         confidence=confidence,
         alignment=alignment,
-        bullish_count=bullish_count,
-        bearish_count=bearish_count,
-        wait_count=wait_count,
-        total_timeframes=total,
+
+        bullish_count=(
+            bullish_count
+        ),
+
+        bearish_count=(
+            bearish_count
+        ),
+
+        wait_count=(
+            wait_count
+        ),
+
+        total_timeframes=(
+            total
+        ),
+
         strongest_timeframe=(
             strongest.timeframe
         ),
+
         summary=summary,
-        timeframes=tuple(signals),
+
+        timeframes=tuple(
+            signals
+        ),
     )

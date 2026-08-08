@@ -57,6 +57,10 @@ from .services.market_scan_service import (
 )
 from .services.scanner import scan_symbol
 from .services.scanner_v2 import build_scanner_v2_response
+from .services.backtester import (
+    backtest_to_dict,
+    run_backtest,
+)
 
 
 SCRIP_MASTER_URL = (
@@ -306,6 +310,165 @@ async def health() -> dict[str, Union[bool, str]]:
         "smartapi_configured": settings.smartapi_ready,
         "market_warning": app.state.market_warning,
     }
+
+
+
+@app.get(
+    "/api/v2/backtest/{symbol}",
+    dependencies=[Depends(require_owner)],
+)
+async def backtest_symbol(
+    symbol: str,
+    interval: str = "5m",
+    minimum_confidence: int = 60,
+    session: AsyncSession = Depends(get_session),
+):
+    if interval not in {
+        "1m",
+        "5m",
+        "15m",
+    }:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Backtest interval must be "
+                "1m, 5m, or 15m"
+            ),
+        )
+
+    symbol_upper = symbol.upper()
+
+    instrument = await resolve_instrument(
+        session,
+        symbol_upper,
+    )
+
+    try:
+        candles = await market().candles(
+            instrument.symbol,
+            interval,
+            instrument.token,
+        )
+
+        result = run_backtest(
+            symbol=instrument.symbol,
+            timeframe=interval,
+            candles=candles,
+            minimum_confidence=minimum_confidence,
+            warmup_bars=60,
+            max_hold_bars=12,
+        )
+
+        return backtest_to_dict(
+            result
+        )
+
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=str(exc),
+        ) from exc
+
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                f"Backtest failed for "
+                f"{symbol_upper}: {exc}"
+            ),
+        ) from exc
+
+
+
+@app.get(
+    "/api/v2/backtest-history/{symbol}",
+    dependencies=[Depends(require_owner)],
+)
+async def backtest_history(
+    symbol: str,
+    interval: str = "5m",
+    days: int = 30,
+    minimum_confidence: int = 60,
+    session: AsyncSession = Depends(get_session),
+):
+    if interval not in {
+        "1m",
+        "5m",
+        "15m",
+    }:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Backtest interval must be "
+                "1m, 5m, or 15m"
+            ),
+        )
+
+    if days < 1:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Days must be at least 1"
+            ),
+        )
+
+    symbol_upper = symbol.upper()
+
+    instrument = await resolve_instrument(
+        session,
+        symbol_upper,
+    )
+
+    provider = market()
+
+    try:
+        candles = await provider.historical_candles(
+            instrument.symbol,
+            interval,
+            instrument.token,
+            days,
+        )
+
+        result = run_backtest(
+            symbol=instrument.symbol,
+            timeframe=interval,
+            candles=candles,
+            minimum_confidence=minimum_confidence,
+            warmup_bars=60,
+            max_hold_bars=12,
+        )
+
+        response = backtest_to_dict(
+            result
+        )
+
+        response["requested_days"] = days
+
+        response["market_mode"] = (
+            "demo"
+            if isinstance(
+                provider,
+                DemoMarketData,
+            )
+            else "smartapi"
+        )
+
+        return response
+
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=str(exc),
+        ) from exc
+
+    except Exception as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Historical backtest failed "
+                f"for {symbol_upper}: {exc}"
+            ),
+        ) from exc
 
 
 @app.post("/api/auth/login")

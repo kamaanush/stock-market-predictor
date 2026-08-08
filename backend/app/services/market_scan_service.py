@@ -153,7 +153,8 @@ async def scan_single_timeframe(
     )
 
     pipeline_result = build_pipeline_analysis(
-        scanner_result
+        result=scanner_result,
+        candles=candles,
     )
 
     return {
@@ -207,28 +208,54 @@ async def scan_single_symbol(
                 "decision",
                 {},
             ),
+
             "market_structure": result.get(
                 "market_structure",
                 {},
             ),
+
             "trend_strength": result.get(
                 "trend_strength",
                 {},
             ),
+
             "momentum": result.get(
                 "momentum",
                 {},
             ),
+
             "participation": result.get(
                 "participation",
                 {},
             ),
+
+            "buyer_seller_pressure": result.get(
+                "buyer_seller_pressure",
+                {},
+            ),
+
+            "candle_flow": result.get(
+                "candle_flow",
+                {},
+            ),
+
             "location": result.get(
                 "location",
                 {},
             ),
+
             "risk": result.get(
                 "risk",
+                {},
+            ),
+
+            "breakout_readiness": result.get(
+                "breakout_readiness",
+                {},
+            ),
+
+            "confidence": result.get(
+                "confidence",
                 {},
             ),
         }

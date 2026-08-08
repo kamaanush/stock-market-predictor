@@ -10,6 +10,7 @@ from .pipeline_service import build_pipeline_analysis
 def build_scanner_v2_response(
     result: dict[str, Any],
     interval: str,
+    candles: list[dict[str, Any]] | None = None,
 ) -> ScannerV2Out:
     # ---------------------------------------------------------
     # RAW INDICATOR VALUES
@@ -149,8 +150,9 @@ def build_scanner_v2_response(
     # ---------------------------------------------------------
 
     pipeline = build_pipeline_analysis(
-        result
-    )
+    result=result,
+    candles=candles,
+     )
 
     decision = pipeline[
         "decision"
@@ -178,6 +180,22 @@ def build_scanner_v2_response(
 
     risk_analysis = pipeline[
         "risk"
+    ]
+
+    buyer_seller_pressure = pipeline[
+        "buyer_seller_pressure"
+    ]
+
+    candle_flow = pipeline[
+        "candle_flow"
+    ]
+
+    breakout_readiness = pipeline[
+        "breakout_readiness"
+    ]
+
+    master_confidence = pipeline[
+        "confidence"
     ]
 
     # ---------------------------------------------------------
@@ -230,11 +248,11 @@ def build_scanner_v2_response(
     # ---------------------------------------------------------
 
     confidence = int(
-        decision.get(
-            "confidence",
-            0,
-        )
+    master_confidence.get(
+        "confidence",
+        0,
     )
+)
 
     if confidence >= 90:
         probability_label = (
@@ -270,10 +288,10 @@ def build_scanner_v2_response(
         )
     )
 
-    final_action = str(
-        decision.get(
-            "action",
-            "NO TRADE",
+    final_grade = str(
+         master_confidence.get(
+         "grade",
+         "AVOID",
         )
     )
 
@@ -290,6 +308,16 @@ def build_scanner_v2_response(
             "HIGH",
         )
     )
+
+    final_action = str(
+        decision.get(
+            "action",
+            result.get(
+                "action_status",
+                "NO TRADE",
+            ),
+        )
+    ).upper()
 
     # ---------------------------------------------------------
     # AI EXPLANATION

@@ -38,6 +38,9 @@ from .trend_strength import (
     evaluate_trend_strength,
 )
 
+from .confidence_engine import (
+    evaluate_confidence,
+)
 
 def _neutral_candle_flow() -> CandleFlowResult:
     return CandleFlowResult(
@@ -578,7 +581,56 @@ def build_pipeline_analysis(
             ),
         )
     )
+    # ---------------------------------------------------------
+    # 11. MASTER CONFIDENCE ENGINE
+    # ---------------------------------------------------------
 
+    confidence = evaluate_confidence(
+        signal=decision.signal,
+
+        market_structure_score=(
+            market.score
+        ),
+
+        trend_score=(
+            trend.score
+        ),
+
+        momentum_score=(
+            momentum.score
+        ),
+
+        participation_confirmation=(
+            participation.confirmation
+        ),
+
+        buyer_score=(
+            buyer_seller_pressure
+            .buyers_score
+        ),
+
+        seller_score=(
+            buyer_seller_pressure
+            .sellers_score
+        ),
+
+        candle_flow_direction=(
+            candle_flow.direction
+        ),
+
+        candle_flow_score=(
+            candle_flow.score
+        ),
+
+        breakout_readiness_score=(
+            breakout_readiness
+            .readiness_score
+        ),
+
+        risk_level=(
+            risk.level
+        ),
+    )
     # ---------------------------------------------------------
     # RESPONSE
     # ---------------------------------------------------------
@@ -628,5 +680,8 @@ def build_pipeline_analysis(
             asdict(
                 breakout_readiness
             )
+        ),
+                "confidence": (
+            asdict(confidence)
         ),
     }

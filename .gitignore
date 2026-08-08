@@ -17,3 +17,4 @@ postgres-data/
 *.sqlite
 *.sqlite3
 
+backend/.env
