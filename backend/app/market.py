@@ -519,20 +519,19 @@ class AngelOneMarketData:
         settings: Settings,
     ) -> None:
 
+        self.auth_token = ""
+        self.refresh_token = ""
+        self.feed_token = ""
+
         from SmartApi import (
             SmartConnect,
         )
 
-        self.settings = (
-            settings
-        )
+        self.settings = settings
 
-        self.client = (
-            SmartConnect(
-                api_key=(
-                    settings
-                    .smartapi_api_key
-                )
+        self.client = SmartConnect(
+            api_key=(
+                settings.smartapi_api_key
             )
         )
 
@@ -547,26 +546,18 @@ class AngelOneMarketData:
     ) -> None:
 
         totp = pyotp.TOTP(
-            self.settings
-            .smartapi_totp_secret
+            self.settings.smartapi_totp_secret
         ).now()
 
         response = (
-            self.client
-            .generateSession(
-                self.settings
-                .smartapi_client_code,
-
-                self.settings
-                .smartapi_pin,
-
+            self.client.generateSession(
+                self.settings.smartapi_client_code,
+                self.settings.smartapi_pin,
                 totp,
             )
         )
 
-        if not response.get(
-            "status"
-        ):
+        if not response.get("status"):
 
             message = response.get(
                 "message",
@@ -575,9 +566,43 @@ class AngelOneMarketData:
 
             raise RuntimeError(
                 "SmartAPI login failed: "
-                + str(
-                    message
-                )
+                + str(message)
+            )
+
+        data = response.get(
+            "data",
+            {},
+        )
+
+        self.auth_token = str(
+            data.get(
+                "jwtToken",
+                "",
+            )
+        )
+
+        self.refresh_token = str(
+            data.get(
+                "refreshToken",
+                "",
+            )
+        )
+
+        self.feed_token = str(
+            self.client.getfeedToken()
+            or ""
+        )
+
+        if not self.auth_token:
+            raise RuntimeError(
+                "SmartAPI login succeeded "
+                "but JWT token is missing"
+            )
+
+        if not self.feed_token:
+            raise RuntimeError(
+                "SmartAPI login succeeded "
+                "but feed token is missing"
             )
 
     async def quote(

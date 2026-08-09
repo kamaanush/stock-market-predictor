@@ -94,19 +94,8 @@ def evaluate_confidence(
     # MARKET STRUCTURE — MAX 15
     # --------------------------------------------------
 
-    directional_market_score = _directional_score(
-        signal,
-        market_structure_score,
-    )
-
     market_impact = round(
-        max(
-            0,
-            min(
-                100,
-                directional_market_score,
-            ),
-        )
+        max(0, min(100, market_structure_score))
         * 15
         / 100
     )
@@ -117,8 +106,8 @@ def evaluate_confidence(
             impact=market_impact,
             max_weight=15,
             reason=(
-                f"Directional market structure score is "
-                f"{directional_market_score}/100"
+                f"Market structure score is "
+                f"{market_structure_score}/100"
             ),
         )
     )
@@ -127,19 +116,10 @@ def evaluate_confidence(
     # TREND — MAX 15
     # --------------------------------------------------
 
-    directional_trend_score = _directional_score(
-        signal,
-        trend_score,
-    )
-
+    # Your trend engine currently uses a smaller
+    # internal scale, so normalize it to 15.
     trend_impact = round(
-        max(
-            0,
-            min(
-                40,
-                directional_trend_score,
-            ),
-        )
+        max(0, min(40, trend_score))
         * 15
         / 40
     )
@@ -149,10 +129,7 @@ def evaluate_confidence(
             module="Trend Strength",
             impact=trend_impact,
             max_weight=15,
-            reason=(
-                f"Directional trend score is "
-                f"{directional_trend_score}"
-            ),
+            reason=f"Trend score is {trend_score}",
         )
     )
 
@@ -160,33 +137,20 @@ def evaluate_confidence(
     # MOMENTUM — MAX 10
     # --------------------------------------------------
 
-    directional_momentum = _directional_score(
-        signal,
-        momentum_score,
-    )
-
+    # Momentum may be negative or positive.
     normalized_momentum = max(
         -100,
-        min(
-            100,
-            directional_momentum,
-        ),
+        min(100, momentum_score),
     )
 
     if normalized_momentum > 0:
         momentum_impact = round(
-            normalized_momentum
-            * 10
-            / 100
+            normalized_momentum * 10 / 100
         )
-
     elif normalized_momentum < 0:
         momentum_impact = round(
-            normalized_momentum
-            * 5
-            / 100
+            normalized_momentum * 5 / 100
         )
-
     else:
         momentum_impact = 0
 
@@ -196,8 +160,8 @@ def evaluate_confidence(
             impact=momentum_impact,
             max_weight=10,
             reason=(
-                f"Directional momentum score is "
-                f"{directional_momentum}"
+                f"Momentum score is "
+                f"{momentum_score}"
             ),
         )
     )

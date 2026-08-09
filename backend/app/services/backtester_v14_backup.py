@@ -769,37 +769,10 @@ def run_backtest(
             pipeline
         )
 
-        # =============================================
-        # V1.5 - SIGNAL ALIGNMENT
-        # =============================================
-        # scanner_result owns the trade plan:
-        # entry / stoploss / target1 / target2
-        #
-        # pipeline owns the final confirmation.
-        #
-        # We only backtest when BOTH engines agree
-        # on the same BUY or SELL direction.
-
-        scanner_signal = str(
-            scanner_result.get(
-                "signal",
-                "WAIT",
-            )
-        ).upper()
-
         if signal not in {
             "BUY",
             "SELL",
         }:
-            continue
-
-        if scanner_signal not in {
-            "BUY",
-            "SELL",
-        }:
-            continue
-
-        if scanner_signal != signal:
             continue
 
         setups += 1

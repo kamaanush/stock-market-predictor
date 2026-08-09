@@ -61,7 +61,7 @@ from .services.backtester import (
     backtest_to_dict,
     run_backtest,
 )
-
+from .services.live_market import LiveMarketTracker
 
 SCRIP_MASTER_URL = (
     "https://margincalculator.angelone.in/"
@@ -71,25 +71,133 @@ SCRIP_MASTER_URL = (
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+
     await initialize_database()
     await seed_demo_instruments()
 
+    app.state.live_market = None
+
     try:
-        app.state.market = create_market_data(get_settings())
+        app.state.market = create_market_data(
+            get_settings()
+        )
         app.state.market_warning = ""
-    except Exception:
+
+    except Exception as exc:
         app.state.market = DemoMarketData()
         app.state.market_warning = (
-            "SmartAPI connection failed; using demo market data."
+            "SmartAPI connection failed; "
+            "using demo market data. "
+            f"{exc}"
         )
 
-    alert_worker = asyncio.create_task(alert_worker_loop(app))
+    # -------------------------------------------------
+    # V1.8 LIVE ANGEL ONE MARKET FEED
+    # -------------------------------------------------
+
+    market_client = app.state.market
+
+    if (
+        hasattr(market_client, "auth_token")
+        and hasattr(market_client, "feed_token")
+    ):
+
+        try:
+
+            async with SessionLocal() as session:
+
+                watchlist = list(
+                    (
+                        await session.execute(
+                            select(
+                                WatchlistItem
+                            ).order_by(
+                                WatchlistItem.symbol
+                            )
+                        )
+                    ).scalars()
+                )
+
+            if watchlist:
+
+                settings = get_settings()
+
+                live_market = LiveMarketTracker(
+                    auth_token=(
+                        market_client.auth_token
+                    ),
+                    api_key=(
+                        settings.smartapi_api_key
+                    ),
+                    client_code=(
+                        settings.smartapi_client_code
+                    ),
+                    feed_token=(
+                        market_client.feed_token
+                    ),
+                )
+
+                live_market.configure(
+                    [
+                        (
+                            item.symbol,
+                            item.token,
+                        )
+                        for item in watchlist
+                        if item.token
+                    ]
+                )
+
+                live_market.start()
+
+                app.state.live_market = (
+                    live_market
+                )
+
+                print(
+                    "V1.8 LIVE MARKET STARTED:",
+                    len(watchlist),
+                    "stocks",
+                )
+
+            else:
+
+                print(
+                    "V1.8 LIVE MARKET: "
+                    "watchlist is empty"
+                )
+
+        except Exception as exc:
+
+            print(
+                "V1.8 LIVE MARKET "
+                "START FAILED:",
+                exc,
+            )
+
+    alert_worker = asyncio.create_task(
+        alert_worker_loop(app)
+    )
 
     try:
         yield
+
     finally:
+
+        live_market = getattr(
+            app.state,
+            "live_market",
+            None,
+        )
+
+        if live_market is not None:
+            live_market.stop()
+
         alert_worker.cancel()
-        with suppress(asyncio.CancelledError):
+
+        with suppress(
+            asyncio.CancelledError
+        ):
             await alert_worker
 
 
@@ -107,9 +215,12 @@ async def seed_demo_instruments() -> None:
         for symbol, name, token, kind in demo_instruments:
             existing = (
                 await session.execute(
-                    select(Instrument).where(Instrument.symbol == symbol)
+                    select(Instrument).where(
+                        (Instrument.symbol == symbol)
+                        | (Instrument.token == token)
+                    )
                 )
-            ).scalar_one_or_none()
+            ).scalars().first()
 
             if existing is None:
                 session.add(
@@ -642,6 +753,132 @@ async def get_watchlist(
         )
         for item in items
     ]
+
+
+@app.post(
+    "/api/watchlist/bulk",
+    dependencies=[Depends(require_owner)],
+)
+async def add_watchlist_bulk(
+    symbols: list[str],
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """
+    Add many NSE symbols to the watchlist in one request.
+
+    Example request body:
+    [
+        "RELIANCE",
+        "TCS",
+        "INFY",
+        "SBIN",
+        "ICICIBANK"
+    ]
+    """
+
+    normalized_symbols = []
+
+    for value in symbols:
+        symbol = str(value).strip().upper()
+
+        if (
+            symbol
+            and symbol not in normalized_symbols
+        ):
+            normalized_symbols.append(symbol)
+
+    if not normalized_symbols:
+        raise HTTPException(
+            status_code=422,
+            detail="No valid symbols supplied",
+        )
+
+    # Protect the scanner from accidental massive imports.
+    if len(normalized_symbols) > 500:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Maximum 500 symbols can be added "
+                "in one bulk request"
+            ),
+        )
+
+    instrument_result = await session.execute(
+        select(Instrument).where(
+            Instrument.symbol.in_(
+                normalized_symbols
+            )
+        )
+    )
+
+    instruments = list(
+        instrument_result.scalars()
+    )
+
+    instrument_map = {
+        item.symbol.upper(): item
+        for item in instruments
+    }
+
+    existing_result = await session.execute(
+        select(WatchlistItem.symbol).where(
+            WatchlistItem.symbol.in_(
+                normalized_symbols
+            )
+        )
+    )
+
+    existing_symbols = {
+        str(symbol).upper()
+        for symbol in existing_result.scalars()
+    }
+
+    added: list[str] = []
+    already_exists: list[str] = []
+    unknown: list[str] = []
+
+    for symbol in normalized_symbols:
+
+        if symbol in existing_symbols:
+            already_exists.append(symbol)
+            continue
+
+        instrument = instrument_map.get(
+            symbol
+        )
+
+        if instrument is None:
+            unknown.append(symbol)
+            continue
+
+        session.add(
+            WatchlistItem(
+                symbol=instrument.symbol,
+                name=instrument.name,
+                token=instrument.token,
+                kind=instrument.kind,
+            )
+        )
+
+        added.append(symbol)
+
+    await session.commit()
+
+    return {
+        "requested": len(
+            normalized_symbols
+        ),
+        "added": len(added),
+        "already_exists": len(
+            already_exists
+        ),
+        "unknown": len(unknown),
+        "added_symbols": added,
+        "existing_symbols": (
+            already_exists
+        ),
+        "unknown_symbols": unknown,
+    }
 
 
 @app.post(
@@ -1430,6 +1667,7 @@ async def scan_market_v2(
 async def market_socket(
     websocket: WebSocket,
 ) -> None:
+
     await websocket.accept()
 
     if websocket.session.get("owner") is not True:
@@ -1437,18 +1675,52 @@ async def market_socket(
         return
 
     try:
+
         while True:
-            await websocket.send_json(
-                {
-                    "type": "heartbeat",
-                    "time": (
-                        datetime.utcnow()
-                        .isoformat()
-                    ),
-                }
+
+            live_market = getattr(
+                app.state,
+                "live_market",
+                None,
             )
 
-            await asyncio.sleep(10)
+            if live_market is None:
+
+                await websocket.send_json(
+                    {
+                        "type": "market_status",
+                        "status": "offline",
+                        "time": (
+                            datetime.utcnow()
+                            .isoformat()
+                        ),
+                    }
+                )
+
+            else:
+
+                snapshot = (
+                    live_market.snapshot()
+                )
+
+                await websocket.send_json(
+                    {
+                        "type": "market_update",
+                        "status": (
+                            "live"
+                            if live_market.running
+                            else "offline"
+                        ),
+                        "stocks": snapshot,
+                        "count": len(snapshot),
+                        "time": (
+                            datetime.utcnow()
+                            .isoformat()
+                        ),
+                    }
+                )
+
+            await asyncio.sleep(2)
 
     except WebSocketDisconnect:
         return
