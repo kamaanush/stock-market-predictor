@@ -62,6 +62,7 @@ from .services.backtester import (
     run_backtest,
 )
 from .services.live_market import LiveMarketTracker
+from .services.live_candles import LiveCandleEngine
 
 SCRIP_MASTER_URL = (
     "https://margincalculator.angelone.in/"
@@ -76,6 +77,10 @@ async def lifespan(app: FastAPI):
     await seed_demo_instruments()
 
     app.state.live_market = None
+
+    app.state.live_candles = LiveCandleEngine(
+    max_candles=500
+     )
 
     try:
         app.state.market = create_market_data(
@@ -148,6 +153,77 @@ async def lifespan(app: FastAPI):
                     ]
                 )
 
+                def handle_live_tick(
+                    tick: dict[str, Any],
+                ) -> None:
+
+                    symbol = tick.get(
+                        "symbol"
+                    )
+
+                    price = tick.get(
+                        "ltp"
+                    )
+
+                    if (
+                        not symbol
+                        or price is None
+                    ):
+                        return
+
+                    exchange_timestamp = (
+                        tick.get(
+                            "exchange_timestamp"
+                        )
+                    )
+
+                    timestamp = None
+
+                    if (
+                        exchange_timestamp
+                        is not None
+                    ):
+
+                        try:
+                            timestamp = float(
+                                exchange_timestamp
+                            )
+
+                            if (
+                                timestamp
+                                > 10_000_000_000
+                            ):
+                                timestamp /= 1000.0
+
+                        except (
+                            TypeError,
+                            ValueError,
+                        ):
+                            timestamp = None
+
+                    cumulative_volume = (
+                        tick.get(
+                            "volume"
+                        )
+                    )
+
+                    app.state.live_candles.ingest(
+                        symbol=str(
+                            symbol
+                        ),
+                        price=float(
+                            price
+                        ),
+                        timestamp=timestamp,
+                        cumulative_volume=(
+                            cumulative_volume
+                        ),
+                    )
+
+                live_market.add_listener(
+                    handle_live_tick
+                )
+
                 live_market.start()
 
                 app.state.live_market = (
@@ -159,7 +235,6 @@ async def lifespan(app: FastAPI):
                     len(watchlist),
                     "stocks",
                 )
-
             else:
 
                 print(
@@ -1612,8 +1687,9 @@ async def scan_market_v2(
     """
     Scan the full watchlist across 1m, 5m, and 15m.
 
-    The service applies the modular decision pipeline,
-    multi-timeframe consensus, and opportunity ranking.
+    Prefer candles already maintained by LiveCandleEngine.
+    If local candles are insufficient, use SmartAPI
+    historical candles through a serialized fallback.
     """
     items = list(
         (
@@ -1643,25 +1719,171 @@ async def scan_market_v2(
         for item in items
     ]
 
+    historical_lock = asyncio.Lock()
+
     async def fetch_candles(
         symbol: str,
         timeframe: str,
         token: Optional[str],
     ) -> list[dict[str, Any]]:
-        return await market().candles(
-            symbol,
-            timeframe,
-            token,
+        live_engine = getattr(
+            app.state,
+            "live_candles",
+            None,
         )
+
+        if live_engine is not None:
+            candles_method = getattr(
+                live_engine,
+                "candles",
+                None,
+            )
+
+            if callable(candles_method):
+                try:
+                    local_candles = candles_method(
+                        symbol,
+                        timeframe,
+                        limit=200,
+                    )
+
+                    if len(local_candles) >= 30:
+                        return local_candles
+
+                except Exception as exc:
+                    print(
+                        "Local candle read failed:",
+                        symbol,
+                        timeframe,
+                        exc,
+                    )
+
+        if not token:
+            raise RuntimeError(
+                f"Missing instrument token for {symbol}"
+            )
+
+        async with historical_lock:
+            if live_engine is not None:
+                candles_method = getattr(
+                    live_engine,
+                    "candles",
+                    None,
+                )
+
+                if callable(candles_method):
+                    try:
+                        local_candles = candles_method(
+                            symbol,
+                            timeframe,
+                            limit=200,
+                        )
+
+                        if len(local_candles) >= 30:
+                            return local_candles
+
+                    except Exception:
+                        pass
+
+            days_map = {
+                "1m": 2,
+                "5m": 5,
+                "15m": 10,
+            }
+
+            days = days_map.get(
+                timeframe,
+                5,
+            )
+
+            print(
+                "Historical candle fallback:",
+                symbol,
+                timeframe,
+                f"{days} days",
+            )
+
+            historical = (
+                await market().historical_candles(
+                    symbol,
+                    timeframe,
+                    token,
+                    days=days,
+                )
+            )
+
+            if not historical:
+                raise RuntimeError(
+                    "No historical candles returned "
+                    f"for {symbol} {timeframe}"
+                )
+
+            historical = historical[-200:]
+
+            if live_engine is not None:
+                seed_method = getattr(
+                    live_engine,
+                    "seed",
+                    None,
+                )
+
+                if callable(seed_method):
+                    try:
+                        seed_method(
+                            symbol=symbol,
+                            timeframe=timeframe,
+                            candles=historical,
+                        )
+                    except Exception as exc:
+                        print(
+                            "Unable to seed local candles:",
+                            symbol,
+                            timeframe,
+                            exc,
+                        )
+
+            await asyncio.sleep(0.45)
+
+            return historical
 
     result = await run_market_scan(
         instruments=instruments,
         fetch_candles=fetch_candles,
-        concurrency=4,
+        concurrency=2,
     )
 
-    return market_scan_to_dict(result)
+    return market_scan_to_dict(
+        result
+    )
 
+
+@app.get(
+    "/api/live/candles/{symbol}",
+    dependencies=[Depends(require_owner)],
+)
+async def get_live_candles(
+    symbol: str,
+) -> dict[str, Any]:
+
+    engine = getattr(
+        app.state,
+        "live_candles",
+        None,
+    )
+
+    if engine is None:
+
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Live candle engine "
+                "is not available"
+            ),
+        )
+
+    return engine.snapshot(
+        symbol
+    )
 
 @app.websocket("/api/ws/market")
 async def market_socket(

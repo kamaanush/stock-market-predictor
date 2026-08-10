@@ -205,12 +205,24 @@ class LiveMarketTracker:
             )
         )
 
+        cumulative_volume = (
+            message.get(
+                "volume_trade_for_the_day"
+            )
+        )
+
         tick = {
             "symbol": symbol,
             "token": token,
             "ltp": ltp,
             "exchange_timestamp": (
                 exchange_timestamp
+            ),
+            "volume": (
+                float(cumulative_volume)
+                if cumulative_volume
+                is not None
+                else None
             ),
             "received_at": (
                 datetime.now(
@@ -245,10 +257,10 @@ class LiveMarketTracker:
         ]
 
         self._socket.subscribe(
-            "livev18",
-            1,
-            token_list,
-        )
+              "livev18",
+                2,
+                token_list,
+            )
 
     def _handle_error(
         self,

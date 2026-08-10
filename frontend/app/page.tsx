@@ -59,18 +59,70 @@ type AlertEvent = {
   created_at: string;
 };
 
-type ScannerResult = {
-  symbol: string;
-  signal: "BUY" | "SELL" | "WAIT";
-  score: number;
+type TimeframeRisk = {
+  level: string;
+  risk_score: number;
+  reward_risk_ratio: number | null;
+  stop_distance_percent: number | null;
+  target_distance_percent: number | null;
+  warnings: string[];
+  positives: string[];
+  summary: string;
+};
+
+type TimeframeDecision = {
+  signal: string;
+  confidence: number;
   grade: string;
-  trend: string;
-  reason: string;
-  entry_price: number | null;
-  stoploss: number | null;
-  target1: number | null;
-  target2: number | null;
-  action_status: string;
+  action: string;
+  summary: string;
+};
+
+type TimeframeConfidence = {
+  signal: string;
+  confidence: number;
+  grade: string;
+  probability: string;
+  positive_score: number;
+  penalty_score: number;
+  summary: string;
+};
+
+type TimeframeAnalysis = {
+  decision: TimeframeDecision;
+  market_structure: Record<string, unknown>;
+  trend_strength: Record<string, unknown>;
+  momentum: Record<string, unknown>;
+  participation: Record<string, unknown>;
+  buyer_seller_pressure: Record<string, unknown>;
+  candle_flow: Record<string, unknown>;
+  location: Record<string, unknown>;
+  risk: TimeframeRisk;
+  breakout_readiness: Record<string, unknown>;
+  confidence: TimeframeConfidence;
+};
+
+type MarketOpportunity = {
+  symbol: string;
+  name: string | null;
+  signal: "BUY" | "SELL" | "WAIT";
+  confidence: number;
+  grade: string;
+  action: string;
+  alignment: string;
+  strongest_timeframe: string;
+  timeframes: Record<string, TimeframeAnalysis>;
+};
+
+type MarketScanResponse = {
+  scanned: number;
+  successful: number;
+  failed: number;
+  opportunities: MarketOpportunity[];
+  failures: {
+    symbol: string;
+    error: string;
+  }[];
 };
 
 async function api<T>(
@@ -136,13 +188,16 @@ export default function Home() {
   const [busy, setBusy] = useState(false);
   const [lastEventId, setLastEventId] = useState(0);
 
-  const [scannerResults, setScannerResults] =
-    useState<ScannerResult[]>([]);
+  const [marketScan, setMarketScan] =
+    useState<MarketScanResponse | null>(null);
   const [scannerBusy, setScannerBusy] = useState(false);
   const [autoScannerEnabled, setAutoScannerEnabled] =
     useState(false);
   const [lastScannerRun, setLastScannerRun] =
     useState<string | null>(null);
+
+  const [selectedOpportunity, setSelectedOpportunity] =
+    useState<MarketOpportunity | null>(null);
 
   const scannerRunningRef = useRef(false);
 
@@ -272,29 +327,48 @@ export default function Home() {
     setNotice("");
 
     try {
-      const results = await api<ScannerResult[]>(
-        "/scanner/watchlist?interval=5m",
+      const result = await api<MarketScanResponse>(
+        "/v2/market-scanner",
       );
 
-      setScannerResults(results);
+      setMarketScan(result);
+
+      setSelectedOpportunity((current) => {
+        if (result.opportunities.length === 0) {
+          return null;
+        }
+
+        if (current) {
+          return (
+            result.opportunities.find(
+              (item) => item.symbol === current.symbol,
+            ) || result.opportunities[0]
+          );
+        }
+
+        return result.opportunities[0];
+      });
+
       setLastScannerRun(
         new Date().toLocaleTimeString("en-IN"),
       );
 
-      if (results.length === 0) {
+      if (result.successful === 0) {
         setNotice(
-          "No scanner results found. Add stocks to the watchlist first.",
+          result.failed > 0
+            ? `Scan completed with ${result.failed} failure(s).`
+            : "No scanner results found.",
         );
       } else {
         setNotice(
-          `${results.length} stocks scanned successfully.`,
+          `${result.successful} of ${result.scanned} stocks scanned successfully.`,
         );
       }
     } catch (error) {
       setNotice(
         error instanceof Error
           ? error.message
-          : "Could not run watchlist scanner",
+          : "Could not run V2 market scanner",
       );
     } finally {
       scannerRunningRef.current = false;
@@ -376,7 +450,8 @@ export default function Home() {
       setWatchlist([]);
       setHoldings([]);
       setAlerts([]);
-      setScannerResults([]);
+      setMarketScan(null);
+      setSelectedOpportunity(null);
       setSelected(null);
       setCandles([]);
       setAutoScannerEnabled(false);
@@ -747,11 +822,13 @@ export default function Home() {
               matches={matches}
               interval={interval}
               candles={candles}
-              scannerResults={scannerResults}
+              marketScan={marketScan}
+              selectedOpportunity={selectedOpportunity}
               scannerBusy={scannerBusy}
               autoScannerEnabled={autoScannerEnabled}
               lastScannerRun={lastScannerRun}
               onRunScanner={runWatchlistScanner}
+              onSelectOpportunity={setSelectedOpportunity}
               onToggleAutoScanner={() =>
                 setAutoScannerEnabled(
                   (enabled) => !enabled,
@@ -797,7 +874,8 @@ function WatchlistPanel({
   matches,
   interval,
   candles,
-  scannerResults,
+  marketScan,
+  selectedOpportunity,
   scannerBusy,
   autoScannerEnabled,
   lastScannerRun,
@@ -807,6 +885,7 @@ function WatchlistPanel({
   onSelect,
   onInterval,
   onRunScanner,
+  onSelectOpportunity,
   onToggleAutoScanner,
 }: {
   watchlist: WatchItem[];
@@ -815,7 +894,8 @@ function WatchlistPanel({
   matches: Instrument[];
   interval: string;
   candles: Candle[];
-  scannerResults: ScannerResult[];
+  marketScan: MarketScanResponse | null;
+  selectedOpportunity: MarketOpportunity | null;
   scannerBusy: boolean;
   autoScannerEnabled: boolean;
   lastScannerRun: string | null;
@@ -825,6 +905,7 @@ function WatchlistPanel({
   onSelect: (item: WatchItem) => void;
   onInterval: (value: string) => void;
   onRunScanner: () => void;
+  onSelectOpportunity: (item: MarketOpportunity) => void;
   onToggleAutoScanner: () => void;
 }) {
   return (
@@ -882,7 +963,7 @@ function WatchlistPanel({
             </p>
 
             <h2 className="mt-1 text-xl font-semibold">
-              Ranked Watchlist Signals
+              V2 Multi-Timeframe Opportunities
             </h2>
           </div>
 
@@ -924,93 +1005,150 @@ function WatchlistPanel({
               }
               className="bg-accent px-4 py-2 font-bold text-black disabled:opacity-50"
             >
-              {scannerBusy ? "Scanning…" : "Run Now"}
+              {scannerBusy ? "Scanning…" : "Run V2 Scan"}
             </button>
           </div>
         </div>
 
-        {scannerResults.length === 0 ? (
-          <p className="p-5 text-sm text-muted">
-            Run the scanner to analyze your watchlist.
-          </p>
+        {!marketScan || marketScan.opportunities.length === 0 ? (
+          <div className="p-5 text-sm text-muted">
+            <p>
+              Run the V2 market scanner to analyze and rank your watchlist
+              across 1m, 5m, and 15m.
+            </p>
+
+            {marketScan && marketScan.failures.length > 0 && (
+              <div className="mt-3 space-y-1 text-xs text-red-300">
+                {marketScan.failures.map((failure) => (
+                  <p key={failure.symbol}>
+                    {failure.symbol}: {failure.error}
+                  </p>
+                ))}
+              </div>
+            )}
+          </div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[1050px] text-sm">
+            <table className="w-full min-w-[980px] text-sm">
               <thead>
                 <tr className="border-b border-line text-left text-xs text-muted">
+                  <th className="p-3">Rank</th>
                   <th className="p-3">Symbol</th>
                   <th className="p-3">Signal</th>
-                  <th className="p-3">Score</th>
+                  <th className="p-3">Confidence</th>
                   <th className="p-3">Grade</th>
-                  <th className="p-3">Trend</th>
-                  <th className="p-3">Entry</th>
-                  <th className="p-3">SL</th>
-                  <th className="p-3">T1</th>
-                  <th className="p-3">T2</th>
-                  <th className="p-3">Status</th>
-                  <th className="p-3">Reason</th>
+                  <th className="p-3">Action</th>
+                  <th className="p-3">Alignment</th>
+                  <th className="p-3">Best TF</th>
+                  <th className="p-3">Risk</th>
                 </tr>
               </thead>
 
               <tbody>
-                {scannerResults.map((result) => (
-                  <tr
-                    key={result.symbol}
-                    className="border-b border-line/60 hover:bg-[#102016]"
-                  >
-                    <td className="p-3 font-semibold">
-                      {result.symbol}
-                    </td>
+                {marketScan.opportunities.map((result, index) => {
+                  const strongest =
+                    result.timeframes[result.strongest_timeframe];
+                  const risk = strongest?.risk?.level || "—";
 
-                    <td className="p-3">
-                      <span
-                        className={
-                          result.signal === "BUY"
-                            ? "font-bold text-accent"
-                            : result.signal === "SELL"
-                              ? "font-bold text-red-400"
-                              : "font-bold text-yellow-300"
-                        }
+                  return (
+                    <tr
+                      key={result.symbol}
+                      onClick={() => onSelectOpportunity(result)}
+                      className={`cursor-pointer border-b border-line/60 hover:bg-[#102016] ${
+                        selectedOpportunity?.symbol === result.symbol
+                          ? "bg-[#12301b]"
+                          : ""
+                      }`}
+                    >
+                      <td className="p-3 text-muted">
+                        {String(index + 1).padStart(2, "0")}
+                      </td>
+
+                      <td className="p-3">
+                        <b>{result.symbol}</b>
+                        {result.name && (
+                          <span className="ml-2 text-xs text-muted">
+                            {result.name}
+                          </span>
+                        )}
+                      </td>
+
+                      <td className="p-3">
+                        <span
+                          className={
+                            result.signal === "BUY"
+                              ? "font-bold text-accent"
+                              : result.signal === "SELL"
+                                ? "font-bold text-red-400"
+                                : "font-bold text-yellow-300"
+                          }
+                        >
+                          {result.signal}
+                        </span>
+                      </td>
+
+                      <td className="p-3 font-semibold">
+                        {result.confidence}%
+                      </td>
+
+                      <td className="p-3">
+                        {result.grade}
+                      </td>
+
+                      <td className="p-3">
+                        <span
+                          className={
+                            result.action === "ACTIVE"
+                              ? "font-semibold text-accent"
+                              : "text-yellow-300"
+                          }
+                        >
+                          {result.action}
+                        </span>
+                      </td>
+
+                      <td className="p-3">
+                        {result.alignment}
+                      </td>
+
+                      <td className="p-3 font-semibold text-accent">
+                        {result.strongest_timeframe}
+                      </td>
+
+                      <td
+                        className={`p-3 ${
+                          risk === "VERY HIGH" || risk === "HIGH"
+                            ? "text-red-400"
+                            : risk === "MEDIUM"
+                              ? "text-yellow-300"
+                              : "text-accent"
+                        }`}
                       >
-                        {result.signal}
-                      </span>
-                    </td>
-
-                    <td className="p-3">
-                      {result.score}
-                    </td>
-                    <td className="p-3">
-                      {result.grade}
-                    </td>
-                    <td className="p-3">
-                      {result.trend}
-                    </td>
-                    <td className="p-3">
-                      {money(result.entry_price)}
-                    </td>
-                    <td className="p-3">
-                      {money(result.stoploss)}
-                    </td>
-                    <td className="p-3">
-                      {money(result.target1)}
-                    </td>
-                    <td className="p-3">
-                      {money(result.target2)}
-                    </td>
-                    <td className="p-3">
-                      {result.action_status}
-                    </td>
-
-                    <td className="max-w-md p-3 text-xs text-muted">
-                      {result.reason}
-                    </td>
-                  </tr>
-                ))}
+                        {risk}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
+
+            <div className="flex flex-wrap gap-4 border-t border-line px-4 py-3 text-xs text-muted">
+              <span>Scanned: {marketScan.scanned}</span>
+              <span>Successful: {marketScan.successful}</span>
+              <span>Failed: {marketScan.failed}</span>
+              <span>
+                Ranked opportunities: {marketScan.opportunities.length}
+              </span>
+            </div>
           </div>
         )}
       </div>
+
+      {selectedOpportunity && (
+        <MultiTimeframeDetail
+          opportunity={selectedOpportunity}
+        />
+      )}
 
       <div className="grid gap-6 xl:grid-cols-[minmax(360px,.8fr)_minmax(0,1.5fr)]">
         <div className="border border-line bg-panel">
@@ -1121,7 +1259,7 @@ function WatchlistPanel({
           </div>
 
           {candles.length ? (
-            <StockChart data={candles} />
+            <StockChart data={candles} interval={interval} />
           ) : (
             <div className="grid h-[430px] place-items-center text-muted">
               Select a watched stock to load its chart.
@@ -1130,6 +1268,269 @@ function WatchlistPanel({
         </div>
       </div>
     </>
+  );
+}
+
+function MultiTimeframeDetail({
+  opportunity,
+}: {
+  opportunity: MarketOpportunity;
+}) {
+  const orderedTimeframes = ["1m", "5m", "15m"].filter(
+    (timeframe) => opportunity.timeframes[timeframe],
+  );
+
+  return (
+    <div className="mb-6 border border-line bg-panel">
+      <div className="flex flex-wrap items-start justify-between gap-4 border-b border-line p-4">
+        <div>
+          <p className="text-xs tracking-[.18em] text-accent">
+            MULTI-TIMEFRAME INTELLIGENCE
+          </p>
+
+          <div className="mt-1 flex flex-wrap items-center gap-3">
+            <h2 className="text-xl font-semibold">
+              {opportunity.symbol}
+            </h2>
+
+            <span
+              className={
+                opportunity.signal === "BUY"
+                  ? "font-bold text-accent"
+                  : opportunity.signal === "SELL"
+                    ? "font-bold text-red-400"
+                    : "font-bold text-yellow-300"
+              }
+            >
+              {opportunity.signal}
+            </span>
+
+            <span className="text-sm text-muted">
+              {opportunity.confidence}% confidence
+            </span>
+
+            <span className="text-sm text-muted">
+              Grade {opportunity.grade}
+            </span>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-3 gap-3 text-right text-xs">
+          <div>
+            <p className="text-muted">ACTION</p>
+            <p
+              className={
+                opportunity.action === "ACTIVE"
+                  ? "mt-1 font-semibold text-accent"
+                  : "mt-1 font-semibold text-yellow-300"
+              }
+            >
+              {opportunity.action}
+            </p>
+          </div>
+
+          <div>
+            <p className="text-muted">ALIGNMENT</p>
+            <p className="mt-1 font-semibold">
+              {opportunity.alignment}
+            </p>
+          </div>
+
+          <div>
+            <p className="text-muted">BEST TF</p>
+            <p className="mt-1 font-semibold text-accent">
+              {opportunity.strongest_timeframe}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[1180px] text-sm">
+          <thead>
+            <tr className="border-b border-line text-left text-xs text-muted">
+              <th className="p-3">TIMEFRAME</th>
+              <th className="p-3">SIGNAL</th>
+              <th className="p-3">CONFIDENCE</th>
+              <th className="p-3">ACTION</th>
+              <th className="p-3">RISK</th>
+              <th className="p-3">TREND</th>
+              <th className="p-3">MOMENTUM</th>
+              <th className="p-3">PRESSURE</th>
+              <th className="p-3">CANDLE FLOW</th>
+              <th className="p-3">BREAKOUT</th>
+            </tr>
+          </thead>
+
+          <tbody>
+            {orderedTimeframes.map((timeframe) => {
+              const item = opportunity.timeframes[timeframe];
+
+              const trendStrength =
+                item.trend_strength as {
+                  classification?: string;
+                  direction?: string;
+                  adx?: number;
+                };
+
+              const momentum =
+                item.momentum as {
+                  classification?: string;
+                  direction?: string;
+                  rsi?: number;
+                };
+
+              const pressure =
+                item.buyer_seller_pressure as {
+                  pressure?: string;
+                  dominance?: string;
+                  buyers_score?: number;
+                  sellers_score?: number;
+                };
+
+              const candleFlow =
+                item.candle_flow as {
+                  direction?: string;
+                  strength?: string;
+                  score?: number;
+                };
+
+              const breakout =
+                item.breakout_readiness as {
+                  status?: string;
+                  readiness_score?: number;
+                };
+
+              return (
+                <tr
+                  key={timeframe}
+                  className={
+                    timeframe === opportunity.strongest_timeframe
+                      ? "border-b border-line/60 bg-[#102016]"
+                      : "border-b border-line/60"
+                  }
+                >
+                  <td className="p-3">
+                    <span className="font-bold text-accent">
+                      {timeframe}
+                    </span>
+                    {timeframe === opportunity.strongest_timeframe && (
+                      <span className="ml-2 text-[10px] text-yellow-300">
+                        BEST
+                      </span>
+                    )}
+                  </td>
+
+                  <td className="p-3">
+                    <span
+                      className={
+                        item.decision.signal === "BUY"
+                          ? "font-bold text-accent"
+                          : item.decision.signal === "SELL"
+                            ? "font-bold text-red-400"
+                            : "font-bold text-yellow-300"
+                      }
+                    >
+                      {item.decision.signal}
+                    </span>
+                  </td>
+
+                  <td className="p-3">
+                    <b>{item.confidence.confidence}%</b>
+                    <span className="ml-2 text-xs text-muted">
+                      {item.confidence.probability}
+                    </span>
+                  </td>
+
+                  <td className="p-3">
+                    {item.decision.action}
+                  </td>
+
+                  <td
+                    className={
+                      item.risk.level === "VERY HIGH" ||
+                      item.risk.level === "HIGH"
+                        ? "p-3 text-red-400"
+                        : item.risk.level === "MEDIUM"
+                          ? "p-3 text-yellow-300"
+                          : "p-3 text-accent"
+                    }
+                  >
+                    {item.risk.level}
+                  </td>
+
+                  <td className="p-3">
+                    <b>{trendStrength.direction || "—"}</b>
+                    <span className="mt-1 block text-xs text-muted">
+                      {trendStrength.classification || "—"} · ADX{" "}
+                      {trendStrength.adx ?? "—"}
+                    </span>
+                  </td>
+
+                  <td className="p-3">
+                    <b>{momentum.direction || "—"}</b>
+                    <span className="mt-1 block text-xs text-muted">
+                      {momentum.classification || "—"} · RSI{" "}
+                      {momentum.rsi ?? "—"}
+                    </span>
+                  </td>
+
+                  <td className="p-3">
+                    <b>{pressure.pressure || "—"}</b>
+                    <span className="mt-1 block text-xs text-muted">
+                      B {pressure.buyers_score ?? "—"} / S{" "}
+                      {pressure.sellers_score ?? "—"}
+                    </span>
+                  </td>
+
+                  <td className="p-3">
+                    <b>{candleFlow.direction || "—"}</b>
+                    <span className="mt-1 block text-xs text-muted">
+                      {candleFlow.strength || "—"} · Score{" "}
+                      {candleFlow.score ?? "—"}
+                    </span>
+                  </td>
+
+                  <td className="p-3">
+                    <b>{breakout.status || "—"}</b>
+                    <span className="mt-1 block text-xs text-muted">
+                      Readiness {breakout.readiness_score ?? "—"}%
+                    </span>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="grid gap-4 border-t border-line p-4 lg:grid-cols-3">
+        {orderedTimeframes.map((timeframe) => {
+          const item = opportunity.timeframes[timeframe];
+
+          return (
+            <div
+              key={`${timeframe}-summary`}
+              className="border border-line bg-ink/60 p-4"
+            >
+              <div className="mb-2 flex items-center justify-between">
+                <b className="text-accent">
+                  {timeframe.toUpperCase()} SUMMARY
+                </b>
+
+                <span className="text-xs text-muted">
+                  Risk {item.risk.risk_score}/100
+                </span>
+              </div>
+
+              <p className="text-xs leading-5 text-muted">
+                {item.decision.summary}
+              </p>
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }
 
