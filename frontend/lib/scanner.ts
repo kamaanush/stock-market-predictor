@@ -1,5 +1,5 @@
 import { api } from "./api";
-import { ScannerResult } from "@/types/scanner";
+import { ScannerResult } from "../types/scanner";
 
 export async function scanStock(
     symbol: string,

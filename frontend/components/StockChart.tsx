@@ -181,9 +181,8 @@ export default function StockChart({
               "15s",
 
             tickMarkFormatter: (
-              time,
-              _tickMarkType:
-                TickMarkType,
+              time: number,
+              _tickMarkType: TickMarkType,
             ) => {
               if (
                 typeof time ===
@@ -211,8 +210,8 @@ export default function StockChart({
 
           localization: {
             timeFormatter: (
-              time,
-            ) => {
+               time: number,
+              ) => {
               if (
                 typeof time ===
                 "number"

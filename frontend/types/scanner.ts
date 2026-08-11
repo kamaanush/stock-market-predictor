@@ -14,7 +14,7 @@ export interface ScannerResponse {
   signals: ScannerSignal[];
   generatedAt?: string;
 }
-¯export interface ScannerResult {
+export interface ScannerResult {
 
     symbol: string;
 
