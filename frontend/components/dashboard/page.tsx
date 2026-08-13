@@ -2175,10 +2175,10 @@ useEffect(() => {
             lastMarketUpdate={lastMarketUpdate}
             onOpenScanner={() => setActiveView("scanner")}
             onOpenPortfolio={() => setActiveView("portfolio")}
-            onSelectSymbol={(sym: string) => {
-               setSelected(sym);
+            onSelectSymbol={(sym) => {
+              setSelected(sym);
               setActiveView("watchlist");
-              }}
+            }}
           />
         )}
 
@@ -2195,148 +2195,463 @@ useEffect(() => {
             CHART + WATCHLIST
         =============================================== */}
 
-        {activeView === "scanner" && (
-          <ScannerPanel
-            stocks={stocks}
-            scanners={scanners}
-            selected={selected}
-            scannerLoading={scannerLoading}
-            status={status}
-            lastMarketUpdate={lastMarketUpdate}
-            onSelectSymbol={(symbol: string) => {
-              setSelected(symbol);
-            }}
-            onOpenChart={(symbol: string) => {
-              setSelected(symbol);
-              setActiveView("watchlist");
-            }}
-          />
-        )}
-
         {activeView === "watchlist" && (
-          <section className="primary-grid">
-            <div className="glass chart-card">
-              <div className="card-heading">
-                <div>
-                  <span className="eyebrow">LIVE CHART</span>
-                  <h2>
-                    {selected || "SELECT STOCK"}
-                    <small>{" "}• NSE</small>
-                  </h2>
-                  <div className="hero-price">
-                    {selectedStock
-                      ? `₹ ${selectedStock.ltp.toFixed(2)}`
-                      : "Waiting for market data"}
-                  </div>
+        <section className="primary-grid">
 
-                  {selectedScanner && (
-                    <div className="selected-signal-strip">
-                      <SignalBadge signal={selectedScanner.signal} />
-                      <span className={trendClass(selectedScanner.trend)}>
-                        {selectedScanner.trend}
-                      </span>
-                      <span>CONFIDENCE {selectedScanner.analysis.confidence}%</span>
-                      <span>{selectedScanner.analysis.probability_label}</span>
-                      <span>GRADE {selectedScanner.grade}</span>
-                      <span>{selectedScanner.execution.status}</span>
-                    </div>
-                  )}
-                </div>
 
-                <div className="timeframes">
-                  {(["15s", "1m", "5m", "15m"] as const).map((value) => (
-                    <button
-                      key={value}
-                      className={timeframe === value ? "selected-time" : ""}
-                      onClick={() => setTimeframe(value)}
-                    >
-                      {value}
-                    </button>
-                  ))}
-                </div>
-              </div>
+          {/* =============================================
+              CHART
+          ============================================= */}
 
-              <div className="future-chart real-chart">
-                {chartLoading && chartData.length === 0 ? (
-                  <div className="chart-message">
-                    <div className="pulse-line" />
-                    <strong>LOADING MARKET DATA</strong>
-                    <span>Loading {timeframe} candles for {selected}</span>
-                  </div>
-                ) : chartData.length > 0 ? (
-                  <StockChart data={chartData} interval={timeframe} />
-                ) : (
-                  <div className="chart-message">
-                    <div className="pulse-line" />
-                    <strong>WAITING FOR CANDLES</strong>
-                    <span>No {timeframe} candles available</span>
-                  </div>
-                )}
-              </div>
+          <div className="glass chart-card">
 
-              <div className="chart-meta">
-                <span>TIMEFRAME<strong>{timeframe}</strong></span>
-                <span>CANDLES<strong>{chartData.length}</strong></span>
-                <span>EMA<strong>EMA 20</strong></span>
-                <span>
-                  LAST FEED
-                  <strong>
-                    {lastMarketUpdate
-                      ? new Date(lastMarketUpdate).toLocaleTimeString("en-IN")
-                      : "—"}
-                  </strong>
+            <div className="card-heading">
+
+
+              <div>
+
+                <span className="eyebrow">
+                  LIVE CHART
                 </span>
+
+
+                <h2>
+
+                  {selected ||
+                    "SELECT STOCK"}
+
+                  <small>
+                    {" "}
+                    • NSE
+                  </small>
+
+                </h2>
+
+
+                <div className="hero-price">
+
+                  {selectedStock
+                    ? `₹ ${selectedStock.ltp.toFixed(
+                        2
+                      )}`
+                    : "Waiting for market data"}
+
+                </div>
+
+
+                {selectedScanner && (
+
+                  <div className="selected-signal-strip">
+
+
+                    <SignalBadge
+                      signal={
+                        selectedScanner.signal
+                      }
+                    />
+
+
+                    <span
+                      className={
+                        trendClass(
+                          selectedScanner
+                            .trend
+                        )
+                      }
+                    >
+
+                      {
+                        selectedScanner
+                          .trend
+                      }
+
+                    </span>
+
+
+                    <span>
+
+                      CONFIDENCE{" "}
+                      {
+                        selectedScanner
+                          .analysis
+                          .confidence
+                      }
+                      %
+
+                    </span>
+
+
+                    <span>
+
+                      {
+                        selectedScanner
+                          .analysis
+                          .probability_label
+                      }
+
+                    </span>
+
+
+                    <span>
+
+                      GRADE{" "}
+                      {
+                        selectedScanner
+                          .grade
+                      }
+
+                    </span>
+
+
+                    <span>
+
+                      {
+                        selectedScanner
+                          .execution
+                          .status
+                      }
+
+                    </span>
+
+                  </div>
+
+                )}
+
               </div>
+
+
+              <div className="timeframes">
+
+                {(
+                  [
+                    "15s",
+                    "1m",
+                    "5m",
+                    "15m",
+                  ] as const
+                ).map(
+                  (value) => (
+
+                    <button
+                      key={
+                        value
+                      }
+                      className={
+                        timeframe ===
+                        value
+                          ? "selected-time"
+                          : ""
+                      }
+                      onClick={
+                        () =>
+                          setTimeframe(
+                            value
+                          )
+                      }
+                    >
+
+                      {value}
+
+                    </button>
+
+                  )
+                )}
+
+              </div>
+
             </div>
 
-            <div id="watchlist-section" className="glass watchlist-card">
-              <div className="card-heading compact">
-                <span className="eyebrow">〽 LIVE WATCHLIST</span>
-                <span className="counter">{stocks.length}</span>
-              </div>
 
-              <div className="watch-head">
-                <span>SYMBOL</span>
-                <span>LTP</span>
-                <span>VOLUME</span>
-                <span>SIGNAL</span>
-              </div>
+            <div className="future-chart real-chart">
 
-              <div className="watch-scroll">
-                {sortedStocks.length === 0 ? (
-                  <div className="waiting">
-                    Waiting for Angel One live market data...
-                  </div>
-                ) : (
-                  sortedStocks.map((stock) => {
-                    const scanner = scanners[stock.symbol];
+              {chartLoading &&
+              chartData.length ===
+                0 ? (
+
+                <div className="chart-message">
+
+                  <div className="pulse-line" />
+
+                  <strong>
+                    LOADING MARKET DATA
+                  </strong>
+
+                  <span>
+
+                    Loading{" "}
+                    {timeframe}
+                    {" "}
+                    candles for{" "}
+                    {selected}
+
+                  </span>
+
+                </div>
+
+              ) : chartData.length >
+                0 ? (
+
+                <StockChart
+                  data={
+                    chartData
+                  }
+                  interval={
+                    timeframe
+                  }
+                />
+
+              ) : (
+
+                <div className="chart-message">
+
+                  <div className="pulse-line" />
+
+                  <strong>
+                    WAITING FOR CANDLES
+                  </strong>
+
+                  <span>
+
+                    No{" "}
+                    {timeframe}
+                    {" "}
+                    candles available
+
+                  </span>
+
+                </div>
+
+              )}
+
+            </div>
+
+
+            <div className="chart-meta">
+
+              <span>
+
+                TIMEFRAME
+
+                <strong>
+                  {timeframe}
+                </strong>
+
+              </span>
+
+
+              <span>
+
+                CANDLES
+
+                <strong>
+                  {
+                    chartData.length
+                  }
+                </strong>
+
+              </span>
+
+
+              <span>
+
+                EMA
+
+                <strong>
+                  EMA 20
+                </strong>
+
+              </span>
+
+
+              <span>
+
+                LAST FEED
+
+                <strong>
+
+                  {lastMarketUpdate
+                    ? new Date(
+                        lastMarketUpdate
+                      )
+                        .toLocaleTimeString(
+                          "en-IN"
+                        )
+                    : "—"}
+
+                </strong>
+
+              </span>
+
+            </div>
+
+          </div>
+
+
+          {/* =============================================
+              WATCHLIST
+          ============================================= */}
+
+          <div id="watchlist-section" className="glass watchlist-card">
+
+            <div className="card-heading compact">
+
+              <span className="eyebrow">
+                〽 LIVE WATCHLIST
+              </span>
+
+              <span className="counter">
+                {stocks.length}
+              </span>
+
+            </div>
+
+
+            <div className="watch-head">
+
+              <span>
+                SYMBOL
+              </span>
+
+              <span>
+                LTP
+              </span>
+
+              <span>
+                VOLUME
+              </span>
+
+              <span>
+                SIGNAL
+              </span>
+
+            </div>
+
+
+            <div className="watch-scroll">
+
+              {sortedStocks.length ===
+              0 ? (
+
+                <div className="waiting">
+
+                  Waiting for
+                  Angel One live
+                  market data...
+
+                </div>
+
+              ) : (
+
+                sortedStocks.map(
+                  (stock) => {
+
+                    const scanner =
+                      scanners[
+                        stock.symbol
+                      ];
+
 
                     return (
+
                       <button
-                        key={stock.symbol}
+                        key={
+                          stock.symbol
+                        }
                         className={
-                          stock.symbol === selected
+                          stock.symbol ===
+                          selected
                             ? "watch-row selected-stock"
                             : "watch-row"
                         }
-                        onClick={() => setSelected(stock.symbol)}
+                        onClick={
+                          () =>
+                            setSelected(
+                              stock.symbol
+                            )
+                        }
                       >
-                        <strong>{stock.symbol}</strong>
-                        <span className="live-price">₹{stock.ltp.toFixed(2)}</span>
-                        <span>{stock.volume ?? "—"}</span>
+
+                        <strong>
+
+                          {
+                            stock.symbol
+                          }
+
+                        </strong>
+
+
+                        <span className="live-price">
+
+                          ₹
+                          {stock.ltp.toFixed(
+                            2
+                          )}
+
+                        </span>
+
+
+                        <span>
+
+                          {stock.volume ??
+                            "—"}
+
+                        </span>
+
+
                         {scanner ? (
-                          <SignalBadge signal={scanner.signal} small />
+
+                          <SignalBadge
+                            signal={
+                              scanner.signal
+                            }
+                            small
+                          />
+
                         ) : (
-                          <b>LIVE</b>
+
+                          <b>
+                            LIVE
+                          </b>
+
                         )}
+
                       </button>
+
                     );
-                  })
-                )}
-              </div>
+                  }
+                )
+
+              )}
+
             </div>
-          </section>
+
+          </div>
+
+        </section>
         )}
+
+
+        {/* ===============================================
+            AI AREA
+        =============================================== */}
+
+       {activeView === "scanner" && (
+        <ScannerPanel
+         stocks={stocks}
+         scanners={scanners}
+         selected={selected}
+         scannerLoading={scannerLoading}
+         status={status}
+         lastMarketUpdate={lastMarketUpdate}
+         onSelectSymbol={(symbol: string) => {
+         setSelected(symbol);
+         }}
+         onOpenChart={(symbol: string) => {
+         setSelected(symbol);
+         setActiveView("watchlist");
+         }}
+        />
+       )}
 
         {activeView === "portfolio" && (
         <section
