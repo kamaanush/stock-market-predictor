@@ -1,414 +1,531 @@
-import StockChart from "../StockChart";
-import MultiTimeframeDetail from "./MultiTimeframeDetail";
-import { money } from "./format";
-import type {
-  Candle,
-  Instrument,
-  MarketOpportunity,
-  MarketScanResponse,
-  WatchItem,
-} from "./types";
+"use client";
+
+import StockChart, { Candle } from "../StockChart";
+import styles from "./WatchlistPanel.module.css";
+
+type Timeframe = "15s" | "1m" | "5m" | "15m";
+
+type LiveStock = {
+  symbol: string;
+  token?: string;
+  ltp: number;
+  volume?: number | null;
+  exchange_timestamp?: number | string | null;
+  received_at?: string;
+};
+
+type ScannerResult = {
+  symbol: string;
+  signal: string;
+  score: number;
+  grade: string;
+  trend: string;
+  reason: string;
+
+  technical_analysis: {
+    ema: string;
+    ema_fast: number;
+    ema_slow: number;
+    supertrend: string;
+    supertrend_value: number;
+    adx: number;
+    plus_di: number;
+    minus_di: number;
+    trend_strength: string;
+    rsi: number;
+    macd: string;
+    macd_value: number;
+    macd_signal: number;
+    vwap: string;
+    vwap_value: number;
+    volume: string;
+    volume_value: number;
+    average_volume: number;
+    atr: number;
+    pattern: string | null;
+    pattern_direction: string | null;
+    pattern_confidence: number | null;
+  };
+
+  cpr?: {
+    pivot: number;
+    top_central: number;
+    bottom_central: number;
+    width: number;
+    width_percent: number;
+    classification: string;
+    position: string;
+  };
+
+  trade_plan: {
+    entry: number | null;
+    stoploss: number | null;
+    target1: number | null;
+    target2: number | null;
+    risk_reward: string;
+  };
+
+  analysis: {
+    engine: string;
+    confidence: number;
+    probability_label: string;
+    risk_label: string;
+    summary: string;
+  };
+
+  ai_analysis: {
+    engine: string;
+    market_bias: string;
+    trend_analysis: string;
+    momentum_analysis: string;
+    volume_analysis: string;
+    risk_analysis: string;
+    recommendation: string;
+    overall_summary: string;
+  };
+
+  execution: {
+    status: string;
+    timeframe: string;
+    last_price: number;
+  };
+};
+
+type WatchlistPanelProps = {
+  stocks: LiveStock[];
+  sortedStocks: LiveStock[];
+  selected: string;
+  selectedStock: LiveStock | undefined;
+  scanners: Record<string, ScannerResult>;
+  selectedScanner: ScannerResult | undefined;
+  timeframe: Timeframe;
+  chartData: Candle[];
+  chartLoading: boolean;
+  lastMarketUpdate: string;
+  onSelectSymbol: (symbol: string) => void;
+  onTimeframeChange: (value: Timeframe) => void;
+};
+
+function money(value: number | null | undefined) {
+  if (value == null) return "—";
+  return `₹${value.toFixed(2)}`;
+}
+
+function signalClass(signal?: string) {
+  const value = (signal || "").toUpperCase();
+  if (value === "BUY") return styles.buy;
+  if (value === "SELL") return styles.sell;
+  return styles.wait;
+}
+
+function trendClass(trend?: string) {
+  const value = (trend || "").toUpperCase();
+  if (value === "BULLISH") return styles.bullish;
+  if (value === "BEARISH") return styles.bearish;
+  return styles.neutral;
+}
 
 export default function WatchlistPanel({
-  watchlist,
+  stocks,
+  sortedStocks,
   selected,
-  query,
-  matches,
-  interval,
-  candles,
-  marketScan,
-  selectedOpportunity,
-  scannerBusy,
-  autoScannerEnabled,
-  lastScannerRun,
-  onSearch,
-  onAdd,
-  onRemove,
-  onSelect,
-  onInterval,
-  onRunScanner,
-  onSelectOpportunity,
-  onToggleAutoScanner,
-}: {
-  watchlist: WatchItem[];
-  selected: WatchItem | null;
-  query: string;
-  matches: Instrument[];
-  interval: string;
-  candles: Candle[];
-  marketScan: MarketScanResponse | null;
-  selectedOpportunity: MarketOpportunity | null;
-  scannerBusy: boolean;
-  autoScannerEnabled: boolean;
-  lastScannerRun: string | null;
-  onSearch: (value: string) => void;
-  onAdd: (item: Instrument) => void;
-  onRemove: (symbol: string) => void;
-  onSelect: (item: WatchItem) => void;
-  onInterval: (value: string) => void;
-  onRunScanner: () => void;
-  onSelectOpportunity: (item: MarketOpportunity) => void;
-  onToggleAutoScanner: () => void;
-}) {
+  selectedStock,
+  scanners,
+  selectedScanner,
+  timeframe,
+  chartData,
+  chartLoading,
+  lastMarketUpdate,
+  onSelectSymbol,
+  onTimeframeChange,
+}: WatchlistPanelProps) {
   return (
-    <>
-      <div className="mb-6 flex items-end justify-between gap-5">
+    <section id="watchlist-section" className={styles.shell}>
+      <header className={styles.topHeader}>
         <div>
-          <p className="text-xs tracking-[.18em] text-accent">
-            MARKET OVERVIEW
+          <span className={styles.kicker}>LIVE TRADING WORKSPACE</span>
+          <h1>Watchlist & Chart</h1>
+          <p>
+            Select a symbol, inspect live candles and review the latest AI scanner
+            context in one trading workspace.
           </p>
-          <h1 className="mt-1 text-3xl font-semibold">
-            Watchlist
-          </h1>
         </div>
 
-        <div className="relative w-80">
-          <input
-            value={query}
-            onChange={(event) =>
-              onSearch(event.target.value)
-            }
-            placeholder="Search NSE symbol or company"
-            className="w-full border border-line bg-panel px-3 py-2.5 outline-none focus:border-accent"
-          />
+        <div className={styles.feedStatus}>
+          <span className={styles.liveDot} />
+          <div>
+            <strong>LIVE FEED</strong>
+            <small>
+              {lastMarketUpdate
+                ? new Date(lastMarketUpdate).toLocaleTimeString("en-IN")
+                : "Waiting for feed"}
+            </small>
+          </div>
+        </div>
+      </header>
 
-          {matches.length > 0 && (
-            <div className="absolute z-10 mt-1 w-full border border-line bg-[#0b120d] shadow-xl">
-              {matches.map((item) => (
-                <button
-                  key={`${item.symbol}-${item.token}`}
-                  onClick={() => onAdd(item)}
-                  className="flex w-full items-center justify-between px-3 py-3 text-left hover:bg-[#13321c]"
-                >
+      <div className={styles.mainGrid}>
+        {/* LEFT WATCHLIST RAIL */}
+        <aside className={styles.watchRail}>
+          <div className={styles.railHeader}>
+            <span>WATCHLIST</span>
+            <b>{stocks.length}</b>
+          </div>
+
+          <div className={styles.watchList}>
+            {sortedStocks.length === 0 ? (
+              <div className={styles.emptyRail}>
+                Waiting for Angel One live market data...
+              </div>
+            ) : (
+              sortedStocks.map((stock) => {
+                const scanner = scanners[stock.symbol];
+                const active = selected === stock.symbol;
+
+                return (
+                  <button
+                    key={stock.symbol}
+                    type="button"
+                    onClick={() => onSelectSymbol(stock.symbol)}
+                    className={`${styles.watchItem} ${
+                      active ? styles.watchItemActive : ""
+                    }`}
+                  >
+                    <div className={styles.symbolBlock}>
+                      <strong>{stock.symbol}</strong>
+                      <small>{stock.volume ?? "—"} VOL</small>
+                    </div>
+
+                    <div className={styles.priceBlock}>
+                      <strong>{money(stock.ltp)}</strong>
+
+                      {scanner ? (
+                        <span
+                          className={`${styles.signalMini} ${signalClass(
+                            scanner.signal
+                          )}`}
+                        >
+                          {scanner.signal}
+                        </span>
+                      ) : (
+                        <span className={styles.liveMini}>LIVE</span>
+                      )}
+                    </div>
+                  </button>
+                );
+              })
+            )}
+          </div>
+        </aside>
+
+        {/* CENTER CHART */}
+        <main className={styles.chartPanel}>
+          <div className={styles.chartHeader}>
+            <div>
+              <span className={styles.kicker}>SELECTED SYMBOL</span>
+
+              <div className={styles.titleRow}>
+                <h2>{selected || "SELECT STOCK"}</h2>
+
+                {selectedScanner && (
+                  <span
+                    className={`${styles.signalPill} ${signalClass(
+                      selectedScanner.signal
+                    )}`}
+                  >
+                    {selectedScanner.signal}
+                  </span>
+                )}
+              </div>
+
+              {selectedScanner && (
+                <div className={styles.scannerStrip}>
+                  <span className={trendClass(selectedScanner.trend)}>
+                    {selectedScanner.trend}
+                  </span>
                   <span>
-                    <b>{item.symbol}</b>
-                    <span className="ml-2 text-xs text-muted">
-                      {item.name}
-                    </span>
+                    CONFIDENCE {selectedScanner.analysis.confidence}%
                   </span>
+                  <span>{selectedScanner.analysis.probability_label}</span>
+                  <span>GRADE {selectedScanner.grade}</span>
+                </div>
+              )}
+            </div>
 
-                  <span className="text-xs text-accent">
-                    ADD
-                  </span>
+            <div className={styles.priceHero}>
+              <small>LIVE PRICE</small>
+              <strong>
+                {selectedStock ? money(selectedStock.ltp) : "—"}
+              </strong>
+              <span>{selectedScanner?.execution.status || "WAITING"}</span>
+            </div>
+          </div>
+
+          <div className={styles.toolbar}>
+            <div className={styles.timeframes}>
+              {(["15s", "1m", "5m", "15m"] as const).map((value) => (
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() => onTimeframeChange(value)}
+                  className={timeframe === value ? styles.timeframeActive : ""}
+                >
+                  {value}
                 </button>
               ))}
             </div>
-          )}
-        </div>
-      </div>
 
-      <div className="mb-6 border border-line bg-panel">
-        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-line p-4">
-          <div>
-            <p className="text-xs tracking-[.18em] text-accent">
-              AI SCANNER
-            </p>
-
-            <h2 className="mt-1 text-xl font-semibold">
-              V2 Multi-Timeframe Opportunities
-            </h2>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="text-right text-xs text-muted">
-              <p>
-                Auto scan:{" "}
-                <span
-                  className={
-                    autoScannerEnabled
-                      ? "text-accent"
-                      : "text-yellow-300"
-                  }
-                >
-                  {autoScannerEnabled ? "ON" : "OFF"}
-                </span>
-              </p>
-
-              <p>
-                Last scan:{" "}
-                {lastScannerRun || "Not run yet"}
-              </p>
+            <div className={styles.chartMetaTop}>
+              <span>{chartData.length} CANDLES</span>
+              <span>EMA 20</span>
+              <span>VOLUME</span>
             </div>
-
-            <button
-              onClick={onToggleAutoScanner}
-              disabled={watchlist.length === 0}
-              className="border border-line px-4 py-2 font-semibold text-muted hover:border-accent hover:text-accent disabled:opacity-50"
-            >
-              {autoScannerEnabled
-                ? "Stop Auto Scan"
-                : "Start Auto Scan"}
-            </button>
-
-            <button
-              onClick={onRunScanner}
-              disabled={
-                scannerBusy || watchlist.length === 0
-              }
-              className="bg-accent px-4 py-2 font-bold text-black disabled:opacity-50"
-            >
-              {scannerBusy ? "Scanning…" : "Run V2 Scan"}
-            </button>
           </div>
-        </div>
 
-        {!marketScan || marketScan.opportunities.length === 0 ? (
-          <div className="p-5 text-sm text-muted">
-            <p>
-              Run the V2 market scanner to analyze and rank your watchlist
-              across 1m, 5m, and 15m.
-            </p>
+          <div className={styles.chartCanvas}>
+            {chartLoading && chartData.length === 0 ? (
+              <div className={styles.chartEmpty}>
+                <div className={styles.loadingLine} />
+                <strong>LOADING MARKET DATA</strong>
+                <span>
+                  Loading {timeframe} candles for {selected || "selected stock"}
+                </span>
+              </div>
+            ) : chartData.length > 0 ? (
+              <StockChart data={chartData} interval={timeframe} />
+            ) : (
+              <div className={styles.chartEmpty}>
+                <div className={styles.radarEmpty}>
+                  <span />
+                  <span />
+                  <i />
+                  <strong>LIVE</strong>
+                </div>
 
-            {marketScan && marketScan.failures.length > 0 && (
-              <div className="mt-3 space-y-1 text-xs text-red-300">
-                {marketScan.failures.map((failure) => (
-                  <p key={failure.symbol}>
-                    {failure.symbol}: {failure.error}
-                  </p>
-                ))}
+                <strong>WAITING FOR CANDLES</strong>
+                <span>No {timeframe} candles available.</span>
               </div>
             )}
           </div>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[980px] text-sm">
-              <thead>
-                <tr className="border-b border-line text-left text-xs text-muted">
-                  <th className="p-3">Rank</th>
-                  <th className="p-3">Symbol</th>
-                  <th className="p-3">Signal</th>
-                  <th className="p-3">Confidence</th>
-                  <th className="p-3">Grade</th>
-                  <th className="p-3">Action</th>
-                  <th className="p-3">Alignment</th>
-                  <th className="p-3">Best TF</th>
-                  <th className="p-3">Risk</th>
-                </tr>
-              </thead>
 
-              <tbody>
-                {marketScan.opportunities.map((result, index) => {
-                  const strongest =
-                    result.timeframes[result.strongest_timeframe];
-                  const risk = strongest?.risk?.level || "—";
-
-                  return (
-                    <tr
-                      key={result.symbol}
-                      onClick={() => onSelectOpportunity(result)}
-                      className={`cursor-pointer border-b border-line/60 hover:bg-[#102016] ${
-                        selectedOpportunity?.symbol === result.symbol
-                          ? "bg-[#12301b]"
-                          : ""
-                      }`}
-                    >
-                      <td className="p-3 text-muted">
-                        {String(index + 1).padStart(2, "0")}
-                      </td>
-
-                      <td className="p-3">
-                        <b>{result.symbol}</b>
-                        {result.name && (
-                          <span className="ml-2 text-xs text-muted">
-                            {result.name}
-                          </span>
-                        )}
-                      </td>
-
-                      <td className="p-3">
-                        <span
-                          className={
-                            result.signal === "BUY"
-                              ? "font-bold text-accent"
-                              : result.signal === "SELL"
-                                ? "font-bold text-red-400"
-                                : "font-bold text-yellow-300"
-                          }
-                        >
-                          {result.signal}
-                        </span>
-                      </td>
-
-                      <td className="p-3 font-semibold">
-                        {result.confidence}%
-                      </td>
-
-                      <td className="p-3">
-                        {result.grade}
-                      </td>
-
-                      <td className="p-3">
-                        <span
-                          className={
-                            result.action === "ACTIVE"
-                              ? "font-semibold text-accent"
-                              : "text-yellow-300"
-                          }
-                        >
-                          {result.action}
-                        </span>
-                      </td>
-
-                      <td className="p-3">
-                        {result.alignment}
-                      </td>
-
-                      <td className="p-3 font-semibold text-accent">
-                        {result.strongest_timeframe}
-                      </td>
-
-                      <td
-                        className={`p-3 ${
-                          risk === "VERY HIGH" || risk === "HIGH"
-                            ? "text-red-400"
-                            : risk === "MEDIUM"
-                              ? "text-yellow-300"
-                              : "text-accent"
-                        }`}
-                      >
-                        {risk}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-
-            <div className="flex flex-wrap gap-4 border-t border-line px-4 py-3 text-xs text-muted">
-              <span>Scanned: {marketScan.scanned}</span>
-              <span>Successful: {marketScan.successful}</span>
-              <span>Failed: {marketScan.failed}</span>
-              <span>
-                Ranked opportunities: {marketScan.opportunities.length}
-              </span>
+          <div className={styles.bottomStats}>
+            <div>
+              <span>TIMEFRAME</span>
+              <strong>{timeframe}</strong>
+            </div>
+            <div>
+              <span>CANDLES</span>
+              <strong>{chartData.length}</strong>
+            </div>
+            <div>
+              <span>AI SIGNAL</span>
+              <strong>{selectedScanner?.signal || "—"}</strong>
+            </div>
+            <div>
+              <span>CONFIDENCE</span>
+              <strong>
+                {selectedScanner
+                  ? `${selectedScanner.analysis.confidence}%`
+                  : "—"}
+              </strong>
             </div>
           </div>
-        )}
-      </div>
+        </main>
 
-      {selectedOpportunity && (
-        <MultiTimeframeDetail
-          opportunity={selectedOpportunity}
-        />
-      )}
+        {/* RIGHT AI LENS */}
+        <aside className={styles.aiLens}>
+          <div className={styles.lensHeader}>
+            <div>
+              <span className={styles.kicker}>AI TRADE LENS</span>
+              <h2>{selectedScanner?.symbol || "NO SETUP"}</h2>
+            </div>
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(360px,.8fr)_minmax(0,1.5fr)]">
-        <div className="border border-line bg-panel">
-          <div className="grid grid-cols-[1.2fr_.7fr_.6fr_32px] border-b border-line px-4 py-3 text-xs tracking-wider text-muted">
-            <span>SYMBOL</span>
-            <span>PRICE</span>
-            <span>DAY</span>
-            <span />
+            {selectedScanner && (
+              <span
+                className={`${styles.signalLarge} ${signalClass(
+                  selectedScanner.signal
+                )}`}
+              >
+                {selectedScanner.signal}
+              </span>
+            )}
           </div>
 
-          <div className="scrollbar max-h-[570px] overflow-y-auto">
-            {watchlist.length === 0 ? (
-              <p className="p-6 text-sm text-muted">
-                Search the built-in NSE symbols or refresh
-                the instrument master, then add a stock.
-              </p>
-            ) : (
-              watchlist.map((item) => (
-                <div
-                  key={item.symbol}
-                  className={`grid grid-cols-[1.2fr_.7fr_.6fr_32px] items-center px-4 py-4 ${
-                    selected?.symbol === item.symbol
-                      ? "bg-[#12301b]"
-                      : "hover:bg-[#0f1e12]"
-                  }`}
-                >
-                  <button
-                    onClick={() => onSelect(item)}
-                    className="text-left"
-                  >
-                    <b>{item.symbol}</b>
-                    <span className="mt-1 block truncate text-xs text-muted">
-                      {item.name}
-                    </span>
-                  </button>
+          {selectedScanner ? (
+            <>
+              <div className={styles.confidenceCard}>
+                <div className={styles.confidenceRing}>
+                  <span className={styles.ringOuter} />
+                  <span className={styles.ringInner} />
+                  <i
+                    style={{
+                      transform: `rotate(${
+                        -135 + selectedScanner.analysis.confidence * 2.7
+                      }deg)`,
+                    }}
+                  />
+                  <strong>{selectedScanner.analysis.confidence}%</strong>
+                  <small>CONFIDENCE</small>
+                </div>
 
-                  <span>{money(item.last_price)}</span>
-
-                  <span
-                    className={
-                      (item.change_percent || 0) >= 0
-                        ? "text-accent"
-                        : "text-red-400"
-                    }
-                  >
-                    {item.change_percent == null
-                      ? "—"
-                      : `${
-                          item.change_percent >= 0 ? "+" : ""
-                        }${item.change_percent}%`}
+                <div className={styles.confidenceDetails}>
+                  <span>
+                    TREND
+                    <strong className={trendClass(selectedScanner.trend)}>
+                      {selectedScanner.trend}
+                    </strong>
                   </span>
 
-                  <button
-                    onClick={() =>
-                      onRemove(item.symbol)
-                    }
-                    className="text-muted hover:text-red-400"
-                    title={`Remove ${item.symbol}`}
-                  >
-                    ×
-                  </button>
+                  <span>
+                    GRADE
+                    <strong>{selectedScanner.grade}</strong>
+                  </span>
+
+                  <span>
+                    RISK
+                    <strong>{selectedScanner.analysis.risk_label}</strong>
+                  </span>
                 </div>
-              ))
-            )}
-          </div>
-        </div>
+              </div>
 
-        <div className="min-w-0 border border-line bg-panel">
-          <div className="flex items-start justify-between border-b border-line p-5">
-            <div>
-              <h2 className="text-xl font-semibold">
-                {selected?.symbol || "Select a stock"}
-              </h2>
+              <div className={styles.techGrid}>
+                <Metric
+                  label="RSI"
+                  value={selectedScanner.technical_analysis.rsi.toFixed(1)}
+                />
+                <Metric
+                  label="ADX"
+                  value={selectedScanner.technical_analysis.adx.toFixed(1)}
+                />
+                <Metric
+                  label="EMA"
+                  value={selectedScanner.technical_analysis.ema}
+                />
+                <Metric
+                  label="VWAP"
+                  value={selectedScanner.technical_analysis.vwap}
+                />
+                <Metric
+                  label="MACD"
+                  value={selectedScanner.technical_analysis.macd}
+                />
+                <Metric
+                  label="VOLUME"
+                  value={selectedScanner.technical_analysis.volume}
+                />
+              </div>
 
-              <p className="mt-1 text-sm text-muted">
-                {selected?.name ||
-                  "Your chart will appear here"}
-              </p>
-            </div>
+              <div className={styles.tradePlan}>
+                <div className={styles.tradePlanTitle}>
+                  <span>EXECUTION PLAN</span>
+                  <small>{selectedScanner.execution.timeframe}</small>
+                </div>
 
-            <div className="text-right">
-              <strong className="text-xl text-accent">
-                {money(selected?.last_price)}
-              </strong>
+                <div className={styles.planGrid}>
+                  <Plan label="ENTRY" value={money(selectedScanner.trade_plan.entry)} />
+                  <Plan
+                    label="STOP"
+                    value={money(selectedScanner.trade_plan.stoploss)}
+                    danger
+                  />
+                  <Plan
+                    label="TARGET 1"
+                    value={money(selectedScanner.trade_plan.target1)}
+                  />
+                  <Plan
+                    label="TARGET 2"
+                    value={money(selectedScanner.trade_plan.target2)}
+                  />
+                </div>
 
-              <p className="mt-1 text-xs text-muted">
-                EMA 20 · Volume
-              </p>
-            </div>
-          </div>
+                <div className={styles.rrRow}>
+                  <span>RISK / REWARD</span>
+                  <strong>{selectedScanner.trade_plan.risk_reward || "—"}</strong>
+                </div>
+              </div>
 
-          <div className="flex gap-2 border-b border-line p-4">
-            {["15s", "1m", "5m", "15m"].map(
-              (option) => (
-                <button
-                  key={option}
-                  onClick={() => onInterval(option)}
-                  className={`px-3 py-1.5 text-sm ${
-                    interval === option
-                      ? "bg-accent font-bold text-black"
-                      : "border border-line text-muted hover:text-white"
-                  }`}
-                >
-                  {option}
-                </button>
-              ),
-            )}
-          </div>
-
-          {candles.length ? (
-            <StockChart data={candles} interval={interval} />
+              <div className={styles.summary}>
+                <span>AI SUMMARY</span>
+                <p>{selectedScanner.ai_analysis.overall_summary}</p>
+              </div>
+            </>
           ) : (
-            <div className="grid h-[430px] place-items-center text-muted">
-              Select a watched stock to load its chart.
+            <div className={styles.noLens}>
+              <div className={styles.radarLarge}>
+                <span />
+                <span />
+                <i />
+                <strong>AI</strong>
+              </div>
+
+              <h3>No scanner result selected</h3>
+              <p>
+                Select a watched symbol with scanner data to open its AI trade
+                lens.
+              </p>
             </div>
           )}
-        </div>
+        </aside>
       </div>
-    </>
+
+      {selectedScanner && (
+        <div className={styles.insightRail}>
+          <Insight title="TREND" text={selectedScanner.ai_analysis.trend_analysis} />
+          <Insight
+            title="MOMENTUM"
+            text={selectedScanner.ai_analysis.momentum_analysis}
+          />
+          <Insight title="VOLUME" text={selectedScanner.ai_analysis.volume_analysis} />
+          <Insight title="RISK" text={selectedScanner.ai_analysis.risk_analysis} />
+        </div>
+      )}
+    </section>
+  );
+}
+
+function Metric({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className={styles.metric}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function Plan({
+  label,
+  value,
+  danger = false,
+}: {
+  label: string;
+  value: string;
+  danger?: boolean;
+}) {
+  return (
+    <div className={danger ? styles.planDanger : styles.plan}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function Insight({
+  title,
+  text,
+}: {
+  title: string;
+  text: string;
+}) {
+  return (
+    <div className={styles.insight}>
+      <span>{title}</span>
+      <p>{text}</p>
+    </div>
   );
 }

@@ -1,152 +1,294 @@
+"use client";
+
 import type { FormEvent } from "react";
-import { money } from "./format";
-import type { Alert } from "./types";
+import styles from "./AlertsPanel.module.css";
+
+type AlertItem = {
+  id: number;
+  symbol: string;
+  name: string;
+  condition: "ABOVE" | "BELOW";
+  target_price: number;
+  delivery: "BROWSER" | "TELEGRAM" | "BOTH";
+  active: boolean;
+};
+
+type AlertsPanelProps = {
+  alerts: AlertItem[];
+  busy: boolean;
+  message?: string | null;
+  onSave: (event: FormEvent<HTMLFormElement>) => void;
+  onToggle: (alert: AlertItem, active: boolean) => void;
+  onDelete: (alert: AlertItem) => void;
+  onEnableBrowser?: () => void;
+  onRefresh?: () => void;
+};
+
+function money(value: number | null | undefined) {
+  if (value == null) return "—";
+  return `₹${value.toFixed(2)}`;
+}
 
 export default function AlertsPanel({
   alerts,
+  busy,
+  message,
   onSave,
   onToggle,
   onDelete,
-}: {
-  alerts: Alert[];
-  onSave: (event: FormEvent<HTMLFormElement>) => void;
-  onToggle: (alert: Alert, active: boolean) => void;
-  onDelete: (alert: Alert) => void;
-}) {
+  onEnableBrowser,
+  onRefresh,
+}: AlertsPanelProps) {
+  const activeAlerts = alerts.filter((alert) => alert.active);
+  const inactiveAlerts = alerts.filter((alert) => !alert.active);
+  const browserAlerts = alerts.filter(
+    (alert) => alert.delivery === "BROWSER" || alert.delivery === "BOTH"
+  );
+  const telegramAlerts = alerts.filter(
+    (alert) => alert.delivery === "TELEGRAM" || alert.delivery === "BOTH"
+  );
+
   return (
-    <>
-      <p className="text-xs tracking-[.18em] text-accent">
-        NOTIFICATIONS
-      </p>
-
-      <h1 className="mt-1 text-3xl font-semibold">
-        Alerts
-      </h1>
-
-      <div className="mt-6 grid gap-6 xl:grid-cols-[1.5fr_.8fr]">
-        <div className="border border-line bg-panel">
-          {alerts.length === 0 ? (
-            <p className="p-6 text-sm text-muted">
-              No alerts yet. Configure a target price to
-              receive browser sound or Telegram
-              notifications.
-            </p>
-          ) : (
-            alerts.map((alert) => (
-              <div
-                key={alert.id}
-                className="flex items-center justify-between gap-4 border-b border-line px-5 py-4"
-              >
-                <span>
-                  <b>{alert.symbol}</b>
-                  <span className="ml-3 text-muted">
-                    {alert.condition}{" "}
-                    {money(alert.target_price)}
-                  </span>
-                </span>
-
-                <span className="flex items-center gap-3">
-                  <span
-                    className={
-                      alert.active
-                        ? "text-xs text-accent"
-                        : "text-xs text-muted"
-                    }
-                  >
-                    {alert.active
-                      ? alert.delivery
-                      : "TRIGGERED"}
-                  </span>
-
-                  <button
-                    onClick={() =>
-                      onToggle(alert, !alert.active)
-                    }
-                    className="text-xs text-muted hover:text-accent"
-                  >
-                    {alert.active
-                      ? "Pause"
-                      : "Reactivate"}
-                  </button>
-
-                  <button
-                    onClick={() => onDelete(alert)}
-                    className="text-lg text-muted hover:text-red-400"
-                    title="Delete alert"
-                  >
-                    ×
-                  </button>
-                </span>
-              </div>
-            ))
-          )}
+    <section id="alerts-section" className={styles.shell}>
+      <header className={styles.hero}>
+        <div>
+          <span className={styles.kicker}>SMART NOTIFICATIONS</span>
+          <h1>Alerts Command Center</h1>
+          <p>
+            Create price triggers, control delivery channels and manage
+            active notifications from one monitoring workspace.
+          </p>
         </div>
 
-        <form
-          onSubmit={onSave}
-          className="border border-line bg-panel p-5"
-        >
-          <h2 className="mb-4 font-semibold">
-            Create alert
-          </h2>
-
-          <div className="space-y-3">
-            <input
-              name="symbol"
-              required
-              placeholder="NSE symbol"
-              className="w-full border border-line bg-ink px-3 py-2.5 outline-none focus:border-accent"
-            />
-
-            <input
-              name="name"
-              placeholder="Company name (optional)"
-              className="w-full border border-line bg-ink px-3 py-2.5 outline-none focus:border-accent"
-            />
-
-            <select
-              name="condition"
-              className="w-full border border-line bg-ink px-3 py-2.5"
+        <div className={styles.heroActions}>
+          {onEnableBrowser && (
+            <button
+              type="button"
+              className={styles.secondaryButton}
+              onClick={onEnableBrowser}
             >
-              <option value="ABOVE">
-                Price rises above
-              </option>
-              <option value="BELOW">
-                Price falls below
-              </option>
-            </select>
-
-            <input
-              name="targetPrice"
-              required
-              min="0.01"
-              step="any"
-              type="number"
-              placeholder="Target price"
-              className="w-full border border-line bg-ink px-3 py-2.5 outline-none focus:border-accent"
-            />
-
-            <select
-              name="delivery"
-              className="w-full border border-line bg-ink px-3 py-2.5"
-            >
-              <option value="BROWSER">
-                Browser sound
-              </option>
-              <option value="TELEGRAM">
-                Telegram
-              </option>
-              <option value="BOTH">
-                Browser + Telegram
-              </option>
-            </select>
-
-            <button className="w-full bg-accent px-4 py-2.5 font-bold text-black">
-              Save alert
+              ENABLE BROWSER ALERTS
             </button>
-          </div>
-        </form>
+          )}
+
+          {onRefresh && (
+            <button
+              type="button"
+              className={styles.refreshButton}
+              onClick={onRefresh}
+              disabled={busy}
+            >
+              {busy ? "REFRESHING…" : "REFRESH"}
+            </button>
+          )}
+        </div>
+      </header>
+
+      <div className={styles.metricGrid}>
+        <Metric label="TOTAL ALERTS" value={String(alerts.length)} hint="All configured rules" tone="cyan" />
+        <Metric label="ACTIVE" value={String(activeAlerts.length)} hint="Currently monitoring" tone="green" />
+        <Metric label="PAUSED / TRIGGERED" value={String(inactiveAlerts.length)} hint="Not actively monitoring" tone="amber" />
+        <Metric label="DELIVERY CHANNELS" value={`${browserAlerts.length}/${telegramAlerts.length}`} hint="Browser / Telegram" tone="violet" />
       </div>
-    </>
+
+      {message && <div className={styles.message}>{message}</div>}
+
+      <div className={styles.mainGrid}>
+        <section className={styles.alertsCard}>
+          <div className={styles.panelHeader}>
+            <div>
+              <span className={styles.kicker}>ALERT MONITOR</span>
+              <h2>Active & triggered rules</h2>
+            </div>
+            <span className={styles.countBadge}>{alerts.length}</span>
+          </div>
+
+          {alerts.length === 0 ? (
+            <div className={styles.emptyState}>
+              <div className={styles.radar}>
+                <span />
+                <span />
+                <i />
+                <strong>ALERT</strong>
+              </div>
+              <h3>No alerts configured</h3>
+              <p>Create a price rule on the right to begin monitoring.</p>
+            </div>
+          ) : (
+            <div className={styles.alertList}>
+              {alerts.map((alert) => (
+                <article
+                  key={alert.id}
+                  className={`${styles.alertRow} ${
+                    alert.active ? styles.alertActive : styles.alertInactive
+                  }`}
+                >
+                  <div className={styles.alertIdentity}>
+                    <div className={styles.symbolIcon}>
+                      {alert.condition === "ABOVE" ? "↗" : "↘"}
+                    </div>
+
+                    <div>
+                      <strong>{alert.symbol}</strong>
+                      <small>{alert.name || "NSE instrument"}</small>
+                    </div>
+                  </div>
+
+                  <div className={styles.conditionBlock}>
+                    <span>CONDITION</span>
+                    <strong>{alert.condition}</strong>
+                  </div>
+
+                  <div className={styles.priceBlock}>
+                    <span>TARGET</span>
+                    <strong>{money(alert.target_price)}</strong>
+                  </div>
+
+                  <div className={styles.deliveryBlock}>
+                    <span>DELIVERY</span>
+                    <strong>{alert.delivery}</strong>
+                  </div>
+
+                  <div className={styles.statusBlock}>
+                    <span className={alert.active ? styles.statusLive : styles.statusPaused}>
+                      <i />
+                      {alert.active ? "MONITORING" : "PAUSED"}
+                    </span>
+                  </div>
+
+                  <div className={styles.actions}>
+                    <button
+                      type="button"
+                      className={styles.actionButton}
+                      onClick={() => onToggle(alert, !alert.active)}
+                    >
+                      {alert.active ? "PAUSE" : "REACTIVATE"}
+                    </button>
+
+                    <button
+                      type="button"
+                      className={styles.deleteButton}
+                      onClick={() => onDelete(alert)}
+                      title={`Delete ${alert.symbol} alert`}
+                    >
+                      ×
+                    </button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <aside className={styles.sideColumn}>
+          <form onSubmit={onSave} className={styles.createCard}>
+            <div className={styles.formHeading}>
+              <span className={styles.kicker}>CREATE ALERT</span>
+              <h2>New price trigger</h2>
+            </div>
+
+            <div className={styles.formGrid}>
+              <label>
+                <span>NSE SYMBOL</span>
+                <input name="symbol" required placeholder="e.g. RELIANCE" />
+              </label>
+
+              <label>
+                <span>COMPANY NAME</span>
+                <input name="name" placeholder="Optional" />
+              </label>
+
+              <label>
+                <span>TRIGGER CONDITION</span>
+                <select name="condition" defaultValue="ABOVE">
+                  <option value="ABOVE">Price rises above</option>
+                  <option value="BELOW">Price falls below</option>
+                </select>
+              </label>
+
+              <label>
+                <span>TARGET PRICE</span>
+                <input
+                  name="target_price"
+                  type="number"
+                  min="0.01"
+                  step="any"
+                  required
+                  placeholder="0.00"
+                />
+              </label>
+
+              <label>
+                <span>DELIVERY</span>
+                <select name="delivery" defaultValue="BROWSER">
+                  <option value="BROWSER">Browser</option>
+                  <option value="TELEGRAM">Telegram</option>
+                  <option value="BOTH">Browser + Telegram</option>
+                </select>
+              </label>
+            </div>
+
+            <button type="submit" className={styles.primaryButton}>
+              SAVE ALERT <span>↗</span>
+            </button>
+          </form>
+
+          <section className={styles.deliveryCard}>
+            <div className={styles.formHeading}>
+              <span className={styles.kicker}>DELIVERY STATUS</span>
+              <h2>Notification channels</h2>
+            </div>
+
+            <div className={styles.channelList}>
+              <Channel title="Browser" count={browserAlerts.length} active={browserAlerts.length > 0} />
+              <Channel title="Telegram" count={telegramAlerts.length} active={telegramAlerts.length > 0} />
+            </div>
+          </section>
+        </aside>
+      </div>
+    </section>
+  );
+}
+
+function Metric({
+  label,
+  value,
+  hint,
+  tone,
+}: {
+  label: string;
+  value: string;
+  hint: string;
+  tone: "cyan" | "green" | "amber" | "violet";
+}) {
+  return (
+    <div className={`${styles.metric} ${styles[`metric_${tone}`]}`}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+      <small>{hint}</small>
+    </div>
+  );
+}
+
+function Channel({
+  title,
+  count,
+  active,
+}: {
+  title: string;
+  count: number;
+  active: boolean;
+}) {
+  return (
+    <div className={styles.channel}>
+      <div>
+        <strong>{title}</strong>
+        <small>{count} configured</small>
+      </div>
+      <span className={active ? styles.channelOn : styles.channelOff}>
+        <i />
+        {active ? "READY" : "IDLE"}
+      </span>
+    </div>
   );
 }

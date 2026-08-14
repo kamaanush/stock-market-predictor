@@ -278,56 +278,20 @@ class LiveCandleEngine:
                 )
             )
 
-            # ------------------------------------------
-            # 1 MINUTE
-            # ------------------------------------------
-
-            self._update(
-                symbol=symbol,
-                timeframe="1m",
-                bucket=self._bucket(
-                    timestamp,
-                    60,
-                ),
-                price=price,
-                volume_delta=(
-                    volume_delta
-                ),
-            )
-
-            # ------------------------------------------
-            # 5 MINUTES
-            # ------------------------------------------
-
-            self._update(
-                symbol=symbol,
-                timeframe="5m",
-                bucket=self._bucket(
-                    timestamp,
-                    300,
-                ),
-                price=price,
-                volume_delta=(
-                    volume_delta
-                ),
-            )
-
-            # ------------------------------------------
-            # 15 MINUTES
-            # ------------------------------------------
-
-            self._update(
-                symbol=symbol,
-                timeframe="15m",
-                bucket=self._bucket(
-                    timestamp,
-                    900,
-                ),
-                price=price,
-                volume_delta=(
-                    volume_delta
-                ),
-            )
+            # Build all supported live candle timeframes.
+            for timeframe, seconds in {
+                "15s": 15,
+                "1m": 60,
+                "5m": 300,
+                "15m": 900,
+            }.items():
+                self._update(
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    bucket=self._bucket(timestamp, seconds),
+                    price=price,
+                    volume_delta=volume_delta,
+                )
 
     # --------------------------------------------------
     # GET CANDLES
@@ -347,6 +311,7 @@ class LiveCandleEngine:
         )
 
         if timeframe not in {
+            "15s",
             "1m",
             "5m",
             "15m",
@@ -354,7 +319,7 @@ class LiveCandleEngine:
 
             raise ValueError(
                 "Timeframe must be "
-                "1m, 5m, or 15m"
+                "15s, 1m, 5m, or 15m"
             )
 
         with self._lock:
@@ -426,6 +391,11 @@ class LiveCandleEngine:
         return {
             "symbol": normalized_symbol,
 
+            "15s": self.candles(
+                normalized_symbol,
+                "15s",
+            ),
+
             "1m": self.candles(
                 normalized_symbol,
                 "1m",
@@ -460,13 +430,14 @@ class LiveCandleEngine:
         )
 
         if timeframe not in {
+            "15s",
             "1m",
             "5m",
             "15m",
         }:
             raise ValueError(
                 "Timeframe must be "
-                "1m, 5m, or 15m"
+                "15s, 1m, 5m, or 15m"
             )
 
         loaded = 0
@@ -555,6 +526,7 @@ class LiveCandleEngine:
                     continue
 
                 bucket_seconds = {
+                    "15s": 15,
                     "1m": 60,
                     "5m": 300,
                     "15m": 900,

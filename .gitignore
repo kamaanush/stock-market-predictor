@@ -1,22 +1,59 @@
+# Secrets & environment
 .env
 .env.*
 !.env.example
+backend/.env
+*.pem
+*.key
+
+# Python / FastAPI backend
+.venv/
+venv/
+env/
 __pycache__/
 *.py[cod]
+*$py.class
+*.egg-info/
 .pytest_cache/
 .mypy_cache/
-.next/
-node_modules/
+.ruff_cache/
+.coverage
 coverage/
-dist/
-tmp/
-postgres-data/
-.DS_Store
-.venv/
+htmlcov/
+.ipynb_checkpoints/
+
+# Local databases
 *.db
 *.sqlite
 *.sqlite3
+stock_tracker.db
+postgres-data/
 
-backend/.env
-.env
-backend/.env
+# Node / Next.js frontend
+node_modules/
+.next/
+out/
+build/
+dist/
+tmp/
+.turbo/
+.pnpm-store/
+*.tsbuildinfo
+next-env.d.ts
+npm-debug.log*
+yarn-debug.log*
+pnpm-debug.log*
+
+# Editor / OS junk
+.DS_Store
+__MACOSX/
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~
+
+# Backups / scratch (keep in git history, not as live files)
+*_backup.py
+*_backup.ts
+*.bak
