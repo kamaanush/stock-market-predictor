@@ -1422,10 +1422,11 @@ async def create_alert(
     payload: AlertInput,
     session: AsyncSession = Depends(get_session),
 ) -> Alert:
-    alert = Alert(
-        **payload.model_dump(),
-        symbol=payload.symbol.upper(),
-    )
+    data = payload.model_dump()
+
+    data["symbol"] = payload.symbol.upper()
+
+    alert = Alert(**data)
 
     session.add(alert)
     await session.commit()
