@@ -605,6 +605,26 @@ class AngelOneMarketData:
                 "but feed token is missing"
             )
 
+    @staticmethod
+    def _is_invalid_token(
+        response: dict,
+    ) -> bool:
+        if response.get("status"):
+            return False
+
+        message = str(
+            response.get(
+                "message",
+                "",
+            )
+        ).lower()
+
+        return (
+            "invalid token" in message
+            or "token is invalid" in message
+            or "token expired" in message
+        )
+
     async def quote(
         self,
         symbol: str,
@@ -621,6 +641,25 @@ class AngelOneMarketData:
                     token,
                 )
             )
+
+            if self._is_invalid_token(
+                response
+            ):
+                print(
+                    "[SmartAPI] Quote token invalid "
+                    f"for {symbol}. Re-authenticating..."
+                )
+
+                self._login()
+
+                response = (
+                    self.client
+                    .ltpData(
+                        "NSE",
+                        symbol,
+                        token,
+                    )
+                )
 
             if not response.get(
                 "status"
@@ -770,6 +809,23 @@ class AngelOneMarketData:
                 )
             )
 
+            if self._is_invalid_token(
+                response
+            ):
+                print(
+                    "[SmartAPI] Candle token invalid "
+                    f"for {symbol}. Re-authenticating..."
+                )
+
+                self._login()
+
+                response = (
+                    self.client
+                    .getCandleData(
+                        payload
+                    )
+                )
+
             if not response.get(
                 "status"
             ):
@@ -783,8 +839,10 @@ class AngelOneMarketData:
                     )
                 )
 
-            return self._parse_candles(
-                response
+            return (
+                self._parse_candles(
+                    response
+                )
             )
 
         return await asyncio.to_thread(
@@ -856,6 +914,23 @@ class AngelOneMarketData:
                 )
             )
 
+            if self._is_invalid_token(
+                response
+            ):
+                print(
+                    "[SmartAPI] Historical token invalid "
+                    f"for {symbol}. Re-authenticating..."
+                )
+
+                self._login()
+
+                response = (
+                    self.client
+                    .getCandleData(
+                        payload
+                    )
+                )
+
             if not response.get(
                 "status"
             ):
@@ -869,8 +944,10 @@ class AngelOneMarketData:
                     )
                 )
 
-            return self._parse_candles(
-                response
+            return (
+                self._parse_candles(
+                    response
+                )
             )
 
         return await asyncio.to_thread(

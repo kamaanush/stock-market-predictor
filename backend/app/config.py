@@ -1,26 +1,48 @@
 from functools import lru_cache
+from pathlib import Path
 
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import (
+    BaseSettings,
+    SettingsConfigDict,
+)
+
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+ENV_FILE = BASE_DIR / ".env"
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=ENV_FILE,
+        env_file_encoding="utf-8",
+        extra="ignore",
+    )
 
-    app_password: str = "admin123"
-    session_secret: str = "s5wyBQtJtQmnFuiybD2HY_ZOiXsFEYG9pTHJ6Qd1BBGq0sOwQ_lYVundxNrDo6xYf"
-    # SQLite makes the demo usable with one command on a laptop. Docker Compose
-    # overrides this with PostgreSQL for the production-like local stack.
-    database_url: str = "sqlite+aiosqlite:///./stock_tracker.db"
-    smartapi_api_key: str = "ptqyUyjU"
-    smartapi_client_code: str = "K56059679"
-    smartapi_pin: str = "7337"
-    smartapi_totp_secret: str = "XCOJ7QUNRVXCOSN5275SOYL7BM"
-    telegram_bot_token: str = "8556772251:AAGIJusLfKvDGqz-tljK8yNWcYn9K_Lfg2Y"
-    telegram_chat_id: str = "@Kama_stock_predictor_bot"
+    app_password: str = ""
+    session_secret: str = ""
+
+    database_url: str = (
+        "sqlite+aiosqlite:///./stock_tracker.db"
+    )
+
+    smartapi_api_key: str = ""
+    smartapi_client_code: str = ""
+    smartapi_pin: str = ""
+    smartapi_totp_secret: str = ""
+
+    telegram_bot_token: str = ""
+    telegram_chat_id: str = ""
 
     @property
     def smartapi_ready(self) -> bool:
-        return all((self.smartapi_api_key, self.smartapi_client_code, self.smartapi_pin, self.smartapi_totp_secret))
+        return all(
+            (
+                self.smartapi_api_key,
+                self.smartapi_client_code,
+                self.smartapi_pin,
+                self.smartapi_totp_secret,
+            )
+        )
 
 
 @lru_cache
