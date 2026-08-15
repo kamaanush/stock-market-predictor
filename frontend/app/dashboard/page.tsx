@@ -12,10 +12,6 @@ import StockChart, {
 } from "../../components/StockChart";
 import OverviewPanel from "../../components/dashboard/OverviewPanel";
 import ScannerPanel from "../../components/dashboard/ScannerPanel";
-import WatchlistPanel from "../../components/dashboard/WatchlistPanel";
-import PortfolioPanel from "../../components/dashboard/PortfolioPanel";
-import AlertsPanel from "../../components/dashboard/AlertsPanel";
-
 type LiveStock = {
   symbol: string;
   token?: string;
@@ -246,12 +242,17 @@ export default function Dashboard() {
     setWsVersion,
   ] = useState(0);
 
-  const [
-    timeframe,
-    setTimeframe,
-  ] = useState<
-    "15s" | "1m" | "5m" | "15m"
-  >("5m");
+const [
+  timeframe,
+  setTimeframe,
+] = useState<
+  "15s" | "1m" | "5m" | "15m"
+>("5m");
+
+const [
+  preferencesLoaded,
+  setPreferencesLoaded,
+] = useState(false);
 
   const [
     chartData,
@@ -370,7 +371,27 @@ export default function Dashboard() {
 
   }, []);
 
+useEffect(() => {
+  const savedTimeframe =
+    window.localStorage.getItem(
+      "nexus_default_timeframe"
+    );
 
+  console.log(
+    "[NEXUS] Saved timeframe:",
+    savedTimeframe
+  );
+
+  if (
+    savedTimeframe === "1m" ||
+    savedTimeframe === "5m" ||
+    savedTimeframe === "15m"
+  ) {
+    setTimeframe(savedTimeframe);
+  }
+
+  setPreferencesLoaded(true);
+}, []);
   // ==================================================
   // LOGIN
   // ==================================================
@@ -788,14 +809,13 @@ useEffect(() => {
 
   useEffect(() => {
 
-    if (
-      !scannerSymbolsKey ||
-      authenticated !==
-        true
-    ) {
-
-      return;
-    }
+     if (
+     !preferencesLoaded ||
+     !scannerSymbolsKey ||
+     authenticated !== true
+     ) {
+     return;
+      }
 
 
     let active = true;
@@ -930,6 +950,7 @@ useEffect(() => {
     authenticated,
     timeframe,
     scannerSymbolsKey,
+    preferencesLoaded,
   ]);
 
 
@@ -2179,10 +2200,10 @@ useEffect(() => {
             lastMarketUpdate={lastMarketUpdate}
             onOpenScanner={() => setActiveView("scanner")}
             onOpenPortfolio={() => setActiveView("portfolio")}
-            onSelectSymbol={(sym: string) => {
-               setSelected(sym);
+            onSelectSymbol={(sym) => {
+              setSelected(sym);
               setActiveView("watchlist");
-              }}
+            }}
           />
         )}
 
@@ -2199,84 +2220,1101 @@ useEffect(() => {
             CHART + WATCHLIST
         =============================================== */}
 
-        {activeView === "scanner" && (
-          <ScannerPanel
-            stocks={stocks}
-            scanners={scanners}
-            selected={selected}
-            scannerLoading={scannerLoading}
-            status={status}
-            lastMarketUpdate={lastMarketUpdate}
-            onSelectSymbol={(symbol: string) => {
-              setSelected(symbol);
-            }}
-            onOpenChart={(symbol: string) => {
-              setSelected(symbol);
-              setActiveView("watchlist");
-            }}
-          />
+        {activeView === "watchlist" && (
+        <section className="primary-grid">
+
+
+          {/* =============================================
+              CHART
+          ============================================= */}
+
+          <div className="glass chart-card">
+
+            <div className="card-heading">
+
+
+              <div>
+
+                <span className="eyebrow">
+                  LIVE CHART
+                </span>
+
+
+                <h2>
+
+                  {selected ||
+                    "SELECT STOCK"}
+
+                  <small>
+                    {" "}
+                    • NSE
+                  </small>
+
+                </h2>
+
+
+                <div className="hero-price">
+
+                  {selectedStock
+                    ? `₹ ${selectedStock.ltp.toFixed(
+                        2
+                      )}`
+                    : "Waiting for market data"}
+
+                </div>
+
+
+                {selectedScanner && (
+
+                  <div className="selected-signal-strip">
+
+
+                    <SignalBadge
+                      signal={
+                        selectedScanner.signal
+                      }
+                    />
+
+
+                    <span
+                      className={
+                        trendClass(
+                          selectedScanner
+                            .trend
+                        )
+                      }
+                    >
+
+                      {
+                        selectedScanner
+                          .trend
+                      }
+
+                    </span>
+
+
+                    <span>
+
+                      CONFIDENCE{" "}
+                      {
+                        selectedScanner
+                          .analysis
+                          .confidence
+                      }
+                      %
+
+                    </span>
+
+
+                    <span>
+
+                      {
+                        selectedScanner
+                          .analysis
+                          .probability_label
+                      }
+
+                    </span>
+
+
+                    <span>
+
+                      GRADE{" "}
+                      {
+                        selectedScanner
+                          .grade
+                      }
+
+                    </span>
+
+
+                    <span>
+
+                      {
+                        selectedScanner
+                          .execution
+                          .status
+                      }
+
+                    </span>
+
+                  </div>
+
+                )}
+
+              </div>
+
+
+              <div className="timeframes">
+
+                {(
+                  [
+                    "15s",
+                    "1m",
+                    "5m",
+                    "15m",
+                  ] as const
+                ).map(
+                  (value) => (
+
+                    <button
+                      key={
+                        value
+                      }
+                      className={
+                        timeframe ===
+                        value
+                          ? "selected-time"
+                          : ""
+                      }
+                      onClick={
+                        () =>
+                          setTimeframe(
+                            value
+                          )
+                      }
+                    >
+
+                      {value}
+
+                    </button>
+
+                  )
+                )}
+
+              </div>
+
+            </div>
+
+
+            <div className="future-chart real-chart">
+
+              {chartLoading &&
+              chartData.length ===
+                0 ? (
+
+                <div className="chart-message">
+
+                  <div className="pulse-line" />
+
+                  <strong>
+                    LOADING MARKET DATA
+                  </strong>
+
+                  <span>
+
+                    Loading{" "}
+                    {timeframe}
+                    {" "}
+                    candles for{" "}
+                    {selected}
+
+                  </span>
+
+                </div>
+
+              ) : chartData.length >
+                0 ? (
+
+                <StockChart
+                  data={
+                    chartData
+                  }
+                  interval={
+                    timeframe
+                  }
+                />
+
+              ) : (
+
+                <div className="chart-message">
+
+                  <div className="pulse-line" />
+
+                  <strong>
+                    WAITING FOR CANDLES
+                  </strong>
+
+                  <span>
+
+                    No{" "}
+                    {timeframe}
+                    {" "}
+                    candles available
+
+                  </span>
+
+                </div>
+
+              )}
+
+            </div>
+
+
+            <div className="chart-meta">
+
+              <span>
+
+                TIMEFRAME
+
+                <strong>
+                  {timeframe}
+                </strong>
+
+              </span>
+
+
+              <span>
+
+                CANDLES
+
+                <strong>
+                  {
+                    chartData.length
+                  }
+                </strong>
+
+              </span>
+
+
+              <span>
+
+                EMA
+
+                <strong>
+                  EMA 20
+                </strong>
+
+              </span>
+
+
+              <span>
+
+                LAST FEED
+
+                <strong>
+
+                  {lastMarketUpdate
+                    ? new Date(
+                        lastMarketUpdate
+                      )
+                        .toLocaleTimeString(
+                          "en-IN"
+                        )
+                    : "—"}
+
+                </strong>
+
+              </span>
+
+            </div>
+
+          </div>
+
+
+          {/* =============================================
+              WATCHLIST
+          ============================================= */}
+
+          <div id="watchlist-section" className="glass watchlist-card">
+
+            <div className="card-heading compact">
+
+              <span className="eyebrow">
+                〽 LIVE WATCHLIST
+              </span>
+
+              <span className="counter">
+                {stocks.length}
+              </span>
+
+            </div>
+
+
+            <div className="watch-head">
+
+              <span>
+                SYMBOL
+              </span>
+
+              <span>
+                LTP
+              </span>
+
+              <span>
+                VOLUME
+              </span>
+
+              <span>
+                SIGNAL
+              </span>
+
+            </div>
+
+
+            <div className="watch-scroll">
+
+              {sortedStocks.length ===
+              0 ? (
+
+                <div className="waiting">
+
+                  Waiting for
+                  Angel One live
+                  market data...
+
+                </div>
+
+              ) : (
+
+                sortedStocks.map(
+                  (stock) => {
+
+                    const scanner =
+                      scanners[
+                        stock.symbol
+                      ];
+
+
+                    return (
+
+                      <button
+                        key={
+                          stock.symbol
+                        }
+                        className={
+                          stock.symbol ===
+                          selected
+                            ? "watch-row selected-stock"
+                            : "watch-row"
+                        }
+                        onClick={
+                          () =>
+                            setSelected(
+                              stock.symbol
+                            )
+                        }
+                      >
+
+                        <strong>
+
+                          {
+                            stock.symbol
+                          }
+
+                        </strong>
+
+
+                        <span className="live-price">
+
+                          ₹
+                          {stock.ltp.toFixed(
+                            2
+                          )}
+
+                        </span>
+
+
+                        <span>
+
+                          {stock.volume ??
+                            "—"}
+
+                        </span>
+
+
+                        {scanner ? (
+
+                          <SignalBadge
+                            signal={
+                              scanner.signal
+                            }
+                            small
+                          />
+
+                        ) : (
+
+                          <b>
+                            LIVE
+                          </b>
+
+                        )}
+
+                      </button>
+
+                    );
+                  }
+                )
+
+              )}
+
+            </div>
+
+          </div>
+
+        </section>
         )}
 
-             {activeView === "watchlist" && (
-             <WatchlistPanel
-              stocks={stocks}
-               sortedStocks={sortedStocks}
-               selected={selected}
-               selectedStock={selectedStock}
-               scanners={scanners}
-               selectedScanner={selectedScanner}
-               timeframe={timeframe}
-               chartData={chartData}
-               chartLoading={chartLoading}
-               lastMarketUpdate={lastMarketUpdate}
-               onSelectSymbol={(selected: string) => {
-                setSelected(selected);
-              }}
-               onTimeframeChange={(
-                value: "15s" | "1m" | "5m" | "15m"
-               ) => {
-                 setTimeframe(value);
-              }}
-              />
-               )}
 
-                {activeView === "portfolio" && (
-               <PortfolioPanel
-                holdings={holdings}
-                totalPnl={totalPortfolioPnl}
-                totalValue={totalPortfolioValue}
-                busy={portfolioLoading}
-                message={portfolioMessage}
-                onSave={saveHolding}
-                onImport={importPortfolioCsv}
-                onRefresh={() => {
-                 void loadPortfolio();
-                }}
-                  />
-                 )}
+        {/* ===============================================
+            AI AREA
+        =============================================== */}
 
-           {activeView === "alerts" && (
-             <AlertsPanel
-             alerts={alerts}
-             busy={alertsLoading}
-             message={alertsMessage}
-             onSave={createAlert}
-             onToggle={(alert, active) => {
-             void setAlertActive(alert, active);
-             }}
-            onDelete={(alert) => {
-            void deleteAlert(alert);
-           }}
-           onEnableBrowser={() => {
-           if ("Notification" in window) {
-           void Notification.requestPermission();
-          }
+       {activeView === "scanner" && (
+        <ScannerPanel
+         stocks={stocks}
+         scanners={scanners}
+         selected={selected}
+         scannerLoading={scannerLoading}
+         status={status}
+         lastMarketUpdate={lastMarketUpdate}
+         onSelectSymbol={(symbol: string) => {
+         setSelected(symbol);
+         }}
+         onOpenChart={(symbol: string) => {
+         setSelected(symbol);
+         setActiveView("watchlist");
+         }}
+        />
+       )}
+
+        {activeView === "portfolio" && (
+        <section
+          id="portfolio-section"
+          className="glass"
+          style={{
+            marginTop: "12px",
+            padding: "18px",
           }}
-          onRefresh={() => {
-           void loadAlerts();
-           }}
-           />
-           )}
+        >
+          <div className="card-heading compact">
+            <div>
+              <span className="eyebrow">
+                ▣ PORTFOLIO
+              </span>
+              <h2>
+                Holdings & P/L
+              </h2>
+            </div>
+
+            <button
+              type="button"
+              onClick={
+                () =>
+                  void loadPortfolio()
+              }
+              className="selected-time"
+            >
+              {portfolioLoading
+                ? "LOADING..."
+                : "REFRESH"}
+            </button>
+          </div>
+
+          <div
+            className="trade-detail-grid"
+            style={{
+              marginTop: "14px",
+            }}
+          >
+            <div>
+              <span>
+                CURRENT VALUE
+              </span>
+              <strong>
+                {formatPrice(
+                  totalPortfolioValue
+                )}
+              </strong>
+            </div>
+
+            <div>
+              <span>
+                UNREALIZED P/L
+              </span>
+              <strong
+                className={
+                  totalPortfolioPnl >= 0
+                    ? "trend-bullish"
+                    : "trend-bearish"
+                }
+              >
+                {formatPrice(
+                  totalPortfolioPnl
+                )}
+              </strong>
+            </div>
+          </div>
+
+          {portfolioMessage && (
+            <div
+              style={{
+                marginTop: "10px",
+                color: "#7af5ff",
+                fontSize: "10px",
+              }}
+            >
+              {portfolioMessage}
+            </div>
+          )}
+
+          <div
+            style={{
+              marginTop: "14px",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                justifyContent:
+                  "space-between",
+                alignItems:
+                  "center",
+                marginBottom:
+                  "8px",
+                color: "#71869c",
+                fontSize: "10px",
+              }}
+            >
+              <span>
+                HOLDINGS
+              </span>
+              <span>
+                {holdings.length} stock{holdings.length === 1 ? "" : "s"}
+              </span>
+            </div>
+
+            {holdings.length === 0 ? (
+              <div
+                style={{
+                  padding:
+                    "16px 0",
+                  color:
+                    "#71869c",
+                  fontSize:
+                    "11px",
+                }}
+              >
+                No holdings loaded yet.
+              </div>
+            ) : (
+            <div
+              style={{
+                overflowX:
+                  "auto",
+              }}
+            >
+            <table
+              style={{
+                width: "100%",
+                borderCollapse:
+                  "collapse",
+                fontSize: "11px",
+              }}
+            >
+              <thead>
+                <tr
+                  style={{
+                    color: "#71869c",
+                    textAlign: "left",
+                  }}
+                >
+                  <th style={{ padding: "8px" }}>SYMBOL</th>
+                  <th style={{ padding: "8px" }}>QTY</th>
+                  <th style={{ padding: "8px" }}>AVG</th>
+                  <th style={{ padding: "8px" }}>CURRENT</th>
+                  <th style={{ padding: "8px" }}>VALUE</th>
+                  <th style={{ padding: "8px" }}>P/L</th>
+                </tr>
+              </thead>
+
+              <tbody>
+                {holdings.map(
+                  (item) => (
+                    <tr
+                      key={
+                        item.symbol
+                      }
+                      style={{
+                        borderTop:
+                          "1px solid #102238",
+                      }}
+                    >
+                      <td style={{ padding: "8px" }}>
+                        <strong>
+                          {item.symbol}
+                        </strong>
+                      </td>
+                      <td style={{ padding: "8px" }}>
+                        {item.quantity}
+                      </td>
+                      <td style={{ padding: "8px" }}>
+                        {formatPrice(
+                          item.average_price
+                        )}
+                      </td>
+                      <td style={{ padding: "8px" }}>
+                        {formatPrice(
+                          item.current_price
+                        )}
+                      </td>
+                      <td style={{ padding: "8px" }}>
+                        {formatPrice(
+                          item.market_value
+                        )}
+                      </td>
+                      <td
+                        style={{
+                          padding: "8px",
+                        }}
+                        className={
+                          (
+                            item.unrealized_pnl ||
+                            0
+                          ) >= 0
+                            ? "trend-bullish"
+                            : "trend-bearish"
+                        }
+                      >
+                        {formatPrice(
+                          item.unrealized_pnl
+                        )}
+                      </td>
+                    </tr>
+                  )
+                )}
+              </tbody>
+            </table>
+            </div>
+            )}
+          </div>
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns:
+                "repeat(auto-fit, minmax(260px, 1fr))",
+              gap: "12px",
+              marginTop: "16px",
+            }}
+          >
+            <form
+              onSubmit={
+                saveHolding
+              }
+              className="pattern-box"
+            >
+              <span>
+                ADD / UPDATE HOLDING
+              </span>
+
+              {[
+                ["symbol", "Symbol"],
+                ["name", "Company name"],
+                ["token", "Angel token"],
+                ["quantity", "Quantity"],
+                [
+                  "average_price",
+                  "Average buy price",
+                ],
+              ].map(
+                ([name, label]) => (
+                  <input
+                    key={name}
+                    name={name}
+                    required={
+                      name !==
+                      "token"
+                    }
+                    type={
+                      name ===
+                        "quantity" ||
+                      name ===
+                        "average_price"
+                        ? "number"
+                        : "text"
+                    }
+                    step="any"
+                    placeholder={label}
+                    style={{
+                      width: "100%",
+                      marginTop: "8px",
+                      padding:
+                        "10px",
+                      border:
+                        "1px solid #173450",
+                      background:
+                        "#030914",
+                      color:
+                        "#dffaff",
+                    }}
+                  />
+                )
+              )}
+
+              <button
+                type="submit"
+                className="selected-time"
+                style={{
+                  width: "100%",
+                  marginTop: "10px",
+                }}
+              >
+                SAVE HOLDING
+              </button>
+            </form>
+
+            <form
+              onSubmit={
+                importPortfolioCsv
+              }
+              className="pattern-box"
+            >
+              <span>
+                IMPORT PORTFOLIO CSV
+              </span>
+
+              <p
+                style={{
+                  color: "#71869c",
+                  fontSize: "10px",
+                  lineHeight: 1.6,
+                }}
+              >
+                Headers: symbol,
+                name, quantity,
+                average_price.
+                token is optional.
+              </p>
+
+              <input
+                name="file"
+                type="file"
+                accept=".csv,text/csv"
+                style={{
+                  width: "100%",
+                  marginTop: "10px",
+                  color: "#dffaff",
+                }}
+              />
+
+              <button
+                type="submit"
+                className="selected-time"
+                disabled={
+                  portfolioLoading
+                }
+                style={{
+                  width: "100%",
+                  marginTop: "10px",
+                }}
+              >
+                IMPORT CSV
+              </button>
+            </form>
+          </div>
+        </section>
+
+
+        )}
+
+        {activeView === "alerts" && (
+        <section
+          id="alerts-section"
+          className="glass"
+          style={{
+            marginTop: "12px",
+            padding: "18px",
+          }}
+        >
+          <div className="card-heading compact">
+            <div>
+              <span className="eyebrow">
+                ♢ ALERTS
+              </span>
+              <h2>
+                Smart Notifications
+              </h2>
+            </div>
+
+            <button
+              type="button"
+              onClick={
+                () => {
+                  if (
+                    "Notification" in
+                    window
+                  ) {
+                    void Notification
+                      .requestPermission();
+                  }
+                }
+              }
+              className="selected-time"
+            >
+              ENABLE BROWSER ALERTS
+            </button>
+          </div>
+
+          {alertsMessage && (
+            <div
+              style={{
+                marginTop: "10px",
+                color: "#7af5ff",
+                fontSize: "10px",
+              }}
+            >
+              {alertsMessage}
+            </div>
+          )}
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns:
+                "minmax(0, 1.4fr) minmax(280px, .6fr)",
+              gap: "12px",
+              marginTop: "14px",
+            }}
+          >
+            <div
+              className="pattern-box"
+              style={{
+                margin: 0,
+              }}
+            >
+              <span>
+                ACTIVE / TRIGGERED ALERTS
+              </span>
+
+              {alertsLoading ? (
+                <p
+                  style={{
+                    color: "#71869c",
+                    fontSize: "10px",
+                  }}
+                >
+                  Loading alerts...
+                </p>
+              ) : alerts.length === 0 ? (
+                <p
+                  style={{
+                    color: "#71869c",
+                    fontSize: "10px",
+                  }}
+                >
+                  No alerts created yet.
+                </p>
+              ) : (
+                alerts.map(
+                  (alert) => (
+                    <div
+                      key={
+                        alert.id
+                      }
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns:
+                          "1fr auto",
+                        gap: "10px",
+                        alignItems:
+                          "center",
+                        padding:
+                          "10px 0",
+                        borderTop:
+                          "1px solid #102238",
+                      }}
+                    >
+                      <div>
+                        <strong>
+                          {alert.symbol}
+                        </strong>
+
+                        <small
+                          style={{
+                            display:
+                              "block",
+                            color:
+                              "#71869c",
+                            marginTop:
+                              "3px",
+                          }}
+                        >
+                          {alert.condition}{" "}
+                          {formatPrice(
+                            alert.target_price
+                          )}{" "}
+                          •{" "}
+                          {alert.delivery}
+                        </small>
+                      </div>
+
+                      <div
+                        style={{
+                          display:
+                            "flex",
+                          gap: "6px",
+                        }}
+                      >
+                        <button
+                          type="button"
+                          className="selected-time"
+                          onClick={
+                            () =>
+                              void setAlertActive(
+                                alert,
+                                !alert.active
+                              )
+                          }
+                        >
+                          {alert.active
+                            ? "PAUSE"
+                            : "REACTIVATE"}
+                        </button>
+
+                        <button
+                          type="button"
+                          className="selected-time"
+                          onClick={
+                            () =>
+                              void deleteAlert(
+                                alert
+                              )
+                          }
+                        >
+                          DELETE
+                        </button>
+                      </div>
+                    </div>
+                  )
+                )
+              )}
+            </div>
+
+            <form
+              onSubmit={
+                createAlert
+              }
+              className="pattern-box"
+              style={{
+                margin: 0,
+              }}
+            >
+              <span>
+                CREATE ALERT
+              </span>
+
+              <input
+                name="symbol"
+                required
+                placeholder="NSE symbol"
+                style={{
+                  width: "100%",
+                  marginTop: "8px",
+                  padding: "10px",
+                  border:
+                    "1px solid #173450",
+                  background:
+                    "#030914",
+                  color: "#dffaff",
+                }}
+              />
+
+              <input
+                name="name"
+                placeholder="Company name"
+                style={{
+                  width: "100%",
+                  marginTop: "8px",
+                  padding: "10px",
+                  border:
+                    "1px solid #173450",
+                  background:
+                    "#030914",
+                  color: "#dffaff",
+                }}
+              />
+
+              <select
+                name="condition"
+                style={{
+                  width: "100%",
+                  marginTop: "8px",
+                  padding: "10px",
+                  border:
+                    "1px solid #173450",
+                  background:
+                    "#030914",
+                  color: "#dffaff",
+                }}
+              >
+                <option value="ABOVE">
+                  Price rises above
+                </option>
+                <option value="BELOW">
+                  Price falls below
+                </option>
+              </select>
+
+              <input
+                name="target_price"
+                required
+                type="number"
+                min="0.01"
+                step="any"
+                placeholder="Target price"
+                style={{
+                  width: "100%",
+                  marginTop: "8px",
+                  padding: "10px",
+                  border:
+                    "1px solid #173450",
+                  background:
+                    "#030914",
+                  color: "#dffaff",
+                }}
+              />
+
+              <select
+                name="delivery"
+                style={{
+                  width: "100%",
+                  marginTop: "8px",
+                  padding: "10px",
+                  border:
+                    "1px solid #173450",
+                  background:
+                    "#030914",
+                  color: "#dffaff",
+                }}
+              >
+                <option value="BROWSER">
+                  Browser
+                </option>
+                <option value="TELEGRAM">
+                  Telegram
+                </option>
+                <option value="BOTH">
+                  Browser + Telegram
+                </option>
+              </select>
+
+              <button
+                type="submit"
+                className="selected-time"
+                style={{
+                  width: "100%",
+                  marginTop: "10px",
+                }}
+              >
+                SAVE ALERT
+              </button>
+            </form>
+          </div>
+        </section>
+
+
+        )}
 
         {activeView === "backtest" && (
         <section

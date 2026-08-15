@@ -242,12 +242,17 @@ export default function Dashboard() {
     setWsVersion,
   ] = useState(0);
 
-  const [
-    timeframe,
-    setTimeframe,
-  ] = useState<
-    "15s" | "1m" | "5m" | "15m"
-  >("5m");
+const [
+  timeframe,
+  setTimeframe,
+] = useState<
+  "15s" | "1m" | "5m" | "15m"
+>("5m");
+
+const [
+  preferencesLoaded,
+  setPreferencesLoaded,
+] = useState(false);
 
   const [
     chartData,
@@ -366,7 +371,27 @@ export default function Dashboard() {
 
   }, []);
 
+useEffect(() => {
+  const savedTimeframe =
+    window.localStorage.getItem(
+      "nexus_default_timeframe"
+    );
 
+  console.log(
+    "[NEXUS] Saved timeframe:",
+    savedTimeframe
+  );
+
+  if (
+    savedTimeframe === "1m" ||
+    savedTimeframe === "5m" ||
+    savedTimeframe === "15m"
+  ) {
+    setTimeframe(savedTimeframe);
+  }
+
+  setPreferencesLoaded(true);
+}, []);
   // ==================================================
   // LOGIN
   // ==================================================
@@ -784,14 +809,13 @@ useEffect(() => {
 
   useEffect(() => {
 
-    if (
-      !scannerSymbolsKey ||
-      authenticated !==
-        true
-    ) {
-
-      return;
-    }
+     if (
+     !preferencesLoaded ||
+     !scannerSymbolsKey ||
+     authenticated !== true
+     ) {
+     return;
+      }
 
 
     let active = true;
@@ -926,6 +950,7 @@ useEffect(() => {
     authenticated,
     timeframe,
     scannerSymbolsKey,
+    preferencesLoaded,
   ]);
 
 
