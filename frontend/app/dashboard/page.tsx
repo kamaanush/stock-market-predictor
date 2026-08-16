@@ -33,10 +33,12 @@ type LiveMarketMessage = {
 
 type LiveCandleResponse = {
   symbol: string;
-  "15s": Candle[];
-  "1m": Candle[];
-  "5m": Candle[];
-  "15m": Candle[];
+
+  interval:
+    ChartTimeframe;
+
+  candles:
+    Candle[];
 };
 
 type InstrumentSearchResult = {
@@ -55,6 +57,15 @@ type DashboardView =
   | "backtest"
   | "analytics"
   | "settings";
+
+  type ChartTimeframe =
+  | "15s"
+  | "1m"
+  | "5m"
+  | "15m"
+  | "1D"
+  | "1W"
+  | "1M";
 
 type PortfolioHolding = {
   symbol: string;
@@ -210,10 +221,10 @@ export default function Dashboard() {
     setSelected,
   ] = useState("");
 
-  const [
-    clock,
-    setClock,
-  ] = useState(new Date());
+   const [
+     clock,
+     setClock,
+     ] = useState<Date | null>(null);
 
   const [
     authenticated,
@@ -245,9 +256,23 @@ export default function Dashboard() {
 const [
   timeframe,
   setTimeframe,
-] = useState<
-  "15s" | "1m" | "5m" | "15m"
->("5m");
+] = useState<ChartTimeframe>(
+  "15m"
+);
+
+const scannerTimeframe:
+  "1m" |
+  "5m" |
+  "15m" =
+  timeframe === "1m"
+    ? "1m"
+    : timeframe === "5m"
+      ? "5m"
+      : timeframe === "15m"
+        ? "15m"
+        : timeframe === "15s"
+          ? "1m"
+          : "15m";
 
 const [
   preferencesLoaded,
@@ -351,25 +376,25 @@ const [
   // CLOCK
   // ==================================================
 
-  useEffect(() => {
+useEffect(() => {
+  setClock(new Date());
 
-    const timer =
-      window.setInterval(
-        () => {
-          setClock(
-            new Date()
-          );
-        },
-        1000
-      );
+  const timer =
+    window.setInterval(
+      () => {
+        setClock(
+          new Date()
+        );
+      },
+      1000
+    );
 
-    return () => {
-      window.clearInterval(
-        timer
-      );
-    };
-
-  }, []);
+  return () => {
+    window.clearInterval(
+      timer
+    );
+  };
+}, []);
 
 useEffect(() => {
   const savedTimeframe =
@@ -679,7 +704,19 @@ useEffect(() => {
 // ==================================================
 
 useEffect(() => {
-  if (!selected) {
+  console.log(
+    "[CANDLE EFFECT]",
+    {
+      selected,
+      authenticated,
+      timeframe,
+    }
+  );
+
+  if (
+    !selected ||
+    authenticated !== true
+  ) {
     setChartData([]);
     return;
   }
@@ -690,29 +727,40 @@ useEffect(() => {
     try {
       setChartLoading(true);
 
-      const response = await fetch(
-        `${API_BASE}/api/live/candles/${encodeURIComponent(selected)}`,
-        {
-          credentials: "include",
-          cache: "no-store",
-        }
-      );
+      const response =
+        await fetch(
+          `${API_BASE}/api/live/candles/${encodeURIComponent(
+            selected
+          )}?interval=${encodeURIComponent(
+            timeframe
+          )}`,
+          {
+            credentials: "include",
+            cache: "no-store",
+          }
+        );
 
       if (response.status === 401) {
         if (active) {
           setAuthenticated(false);
           setChartData([]);
         }
+
         return;
       }
 
       if (!response.ok) {
         throw new Error(
-          `Candle request failed: ${response.status} ${await response.text()}`
+          `Candle request failed: ${
+            response.status
+          } ${
+            await response.text()
+          }`
         );
       }
 
-      const data: LiveCandleResponse =
+      const data:
+        LiveCandleResponse =
         await response.json();
 
       if (!active) {
@@ -720,7 +768,7 @@ useEffect(() => {
       }
 
       const candles =
-        data[timeframe] ?? [];
+        data.candles ?? [];
 
       console.log(
         "[NEXUS candles]",
@@ -748,23 +796,33 @@ useEffect(() => {
 
   void loadCandles();
 
-  // Refresh the snapshot periodically so newly
-  // generated live candles appear on the chart.
-  const timer = window.setInterval(
-    () => {
-      void loadCandles();
-    },
-    5000
-  );
+  const refreshMs =
+    timeframe === "15s"
+      ? 5000
+      : timeframe === "1m"
+        ? 60000
+        : timeframe === "5m"
+          ? 120000
+          : timeframe === "15m"
+            ? 180000
+            : 300000;
+
+  const timer =
+    window.setInterval(
+      () => {
+        void loadCandles();
+      },
+      refreshMs
+    );
 
   return () => {
     active = false;
     window.clearInterval(timer);
   };
 }, [
+  authenticated,
   selected,
   timeframe,
-  setChartData,
 ]);
 
 
@@ -834,55 +892,85 @@ useEffect(() => {
           .filter(Boolean);
 
 
-      const results =
-        await Promise.allSettled(
+const results:
+  PromiseSettledResult<ScannerResult>[] =
+  [];
 
-          symbols.map(
-            async (
-              symbol
-            ) => {
+for (
+  const symbol of symbols
+) {
+  try {
+    const response =
+      await fetch(
+        `${API_BASE}/api/v2/scanner/${symbol}?interval=${scannerTimeframe}`,
+        {
+          credentials:
+            "include",
+        }
+      );
 
-              const response =
-                await fetch(
-                  `${API_BASE}/api/v2/scanner/${symbol}?interval=${timeframe}`,
-                  {
-                    credentials:
-                      "include",
-                  }
-                );
+    if (
+      response.status ===
+      401
+    ) {
+      throw new Error(
+        "Login required"
+      );
+    }
 
+    if (
+      !response.ok
+    ) {
+      const body =
+        await response
+          .json()
+          .catch(
+            () => ({})
+          );
 
-              if (
-                response.status ===
-                401
-              ) {
+      throw new Error(
+        body.detail ||
+          `${symbol}: scanner failed`
+      );
+    }
 
-                throw new Error(
-                  "Login required"
-                );
-              }
+    const data:
+      ScannerResult =
+      await response.json();
 
+    results.push({
+      status:
+        "fulfilled",
+      value:
+        data,
+    });
+  } catch (
+    error
+  ) {
+    console.error(
+      `[NEXUS scanner] ${symbol}`,
+      error
+    );
 
-              if (
-                !response.ok
-              ) {
+    results.push({
+      status:
+        "rejected",
+      reason:
+        error,
+    });
+  }
 
-                throw new Error(
-                  `${symbol}: scanner failed`
-                );
-              }
-
-
-              const data:
-                ScannerResult =
-                await response
-                  .json();
-
-
-              return data;
-            }
-          )
-        );
+  await new Promise<void>(
+    (
+      resolve
+    ) => {
+      window.setTimeout(
+        resolve,
+        2500
+      );
+    }
+  );
+}
 
 
       if (!active) {
@@ -930,28 +1018,23 @@ useEffect(() => {
     loadScanner();
 
 
-    const timer =
-      window.setInterval(
-        loadScanner,
-        15000
-      );
+    // const timer =
+    //   window.setInterval(
+    //     loadScanner,
+    //     60000
+    //   );
 
 
-    return () => {
+return () => {
+  active = false;
+};
 
-      active = false;
-
-      window.clearInterval(
-        timer
-      );
-    };
-
-  }, [
-    authenticated,
-    timeframe,
-    scannerSymbolsKey,
-    preferencesLoaded,
-  ]);
+}, [
+  authenticated,
+  scannerTimeframe,
+  scannerSymbolsKey,
+  preferencesLoaded,
+]);
 
 
   // ==================================================
@@ -1105,12 +1188,11 @@ useEffect(() => {
 
     void poll();
 
-    const timer =
-      window.setInterval(
-        poll,
-        5000
-      );
-
+const timer =
+  window.setInterval(
+    poll,
+    5000
+  );
     return () => {
       window.clearInterval(
         timer
@@ -2133,39 +2215,35 @@ useEffect(() => {
           </div>
 
 
-          <div className="clock">
+<div className="clock">
 
-            <strong>
+  <strong>
+    {clock
+      ? clock.toLocaleTimeString(
+          "en-IN"
+        )
+      : "--:--:--"}
+  </strong>
 
-              {clock
-                .toLocaleTimeString(
-                  "en-IN"
-                )}
+  <span>
+    {clock
+      ? clock
+          .toLocaleDateString(
+            "en-GB",
+            {
+              day:
+                "2-digit",
+              month:
+                "short",
+              year:
+                "numeric",
+            }
+          )
+          .toUpperCase()
+      : "---"}
+  </span>
 
-            </strong>
-
-
-            <span>
-
-              {clock
-                .toLocaleDateString(
-                  "en-GB",
-                  {
-                    day:
-                      "2-digit",
-
-                    month:
-                      "short",
-
-                    year:
-                      "numeric",
-                  }
-                )
-                .toUpperCase()}
-
-            </span>
-
-          </div>
+</div>
 
 
           <div className="core-status">
@@ -2345,44 +2423,114 @@ useEffect(() => {
               </div>
 
 
-              <div className="timeframes">
+<div
+  className="timeframes"
+  style={{
+    display:
+      "flex",
 
-                {(
-                  [
-                    "15s",
-                    "1m",
-                    "5m",
-                    "15m",
-                  ] as const
-                ).map(
-                  (value) => (
+    alignItems:
+      "center",
 
-                    <button
-                      key={
-                        value
-                      }
-                      className={
-                        timeframe ===
-                        value
-                          ? "selected-time"
-                          : ""
-                      }
-                      onClick={
-                        () =>
-                          setTimeframe(
-                            value
-                          )
-                      }
-                    >
+    gap:
+      "8px",
+  }}
+>
+  <span
+    style={{
+      color:
+        "#71869c",
 
-                      {value}
+      fontSize:
+        "9px",
 
-                    </button>
+      fontWeight:
+        700,
 
-                  )
-                )}
+      letterSpacing:
+        ".08em",
+    }}
+  >
+    TIMEFRAME
+  </span>
 
-              </div>
+  <select
+    value={
+      timeframe
+    }
+
+    onChange={
+      (
+        event
+      ) =>
+        setTimeframe(
+          event.target
+            .value as
+            ChartTimeframe
+        )
+    }
+
+    style={{
+      minWidth:
+        "135px",
+
+      padding:
+        "8px 11px",
+
+      border:
+        "1px solid #1f4534",
+
+      borderRadius:
+        "6px",
+
+      outline:
+        "none",
+
+      background:
+        "#07100b",
+
+      color:
+        "#dff8e9",
+
+      fontSize:
+        "10px",
+
+      fontWeight:
+        700,
+
+      cursor:
+        "pointer",
+    }}
+  >
+    <option value="15s">
+      15 Seconds
+    </option>
+
+          <option value="1m">
+          1 Minute
+          </option>
+
+         <option value="5m">
+          5 Minutes
+          </option>
+
+          <option value="15m">
+           15 Minutes
+          </option>
+
+         <option value="1D">
+           1 Day
+             </option>
+
+             <option value="1W">
+             1 Week
+             </option>
+
+             <option value="1M">
+               1 Month
+                   </option>
+                     </select>
+          </div>
 
             </div>
 

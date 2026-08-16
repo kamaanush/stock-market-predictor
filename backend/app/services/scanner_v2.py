@@ -237,12 +237,14 @@ def build_scanner_v2_response(
 
         if risk_amount > 0:
             ratio = round(
-             reward_amount / risk_amount,
-              2,
-    )
+                reward_amount
+                / risk_amount,
+                2,
+            )
 
-    risk_reward = f"1:{ratio}"
-
+            risk_reward = (
+                f"1:{ratio}"
+            )
     # ---------------------------------------------------------
     # CONFIDENCE
     # ---------------------------------------------------------

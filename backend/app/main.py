@@ -387,6 +387,121 @@ async def evaluate_alerts_once(app: FastAPI) -> None:
         except Exception:
             pass
 
+def aggregate_weekly(
+    candles: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    grouped: dict[
+        tuple[int, int],
+        list[dict[str, Any]],
+    ] = {}
+
+    for candle in candles:
+        dt = datetime.fromtimestamp(
+            candle["time"],
+            IST,
+        )
+
+        iso_year, iso_week, _ = (
+            dt.isocalendar()
+        )
+
+        grouped.setdefault(
+            (iso_year, iso_week),
+            [],
+        ).append(candle)
+
+    output: list[
+        dict[str, Any]
+    ] = []
+
+    for group in grouped.values():
+        group = sorted(
+            group,
+            key=lambda item: item["time"],
+        )
+
+        output.append(
+            {
+                "time": group[0]["time"],
+                "open": group[0]["open"],
+                "high": max(
+                    item["high"]
+                    for item in group
+                ),
+                "low": min(
+                    item["low"]
+                    for item in group
+                ),
+                "close": group[-1]["close"],
+                "volume": sum(
+                    item.get(
+                        "volume",
+                        0,
+                    )
+                    for item in group
+                ),
+            }
+        )
+
+    return output
+
+
+def aggregate_monthly(
+    candles: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    grouped: dict[
+        tuple[int, int],
+        list[dict[str, Any]],
+    ] = {}
+
+    for candle in candles:
+        dt = datetime.fromtimestamp(
+            candle["time"],
+            IST,
+        )
+
+        grouped.setdefault(
+            (
+                dt.year,
+                dt.month,
+            ),
+            [],
+        ).append(candle)
+
+    output: list[
+        dict[str, Any]
+    ] = []
+
+    for group in grouped.values():
+        group = sorted(
+            group,
+            key=lambda item: item["time"],
+        )
+
+        output.append(
+            {
+                "time": group[0]["time"],
+                "open": group[0]["open"],
+                "high": max(
+                    item["high"]
+                    for item in group
+                ),
+                "low": min(
+                    item["low"]
+                    for item in group
+                ),
+                "close": group[-1]["close"],
+                "volume": sum(
+                    item.get(
+                        "volume",
+                        0,
+                    )
+                    for item in group
+                ),
+            }
+        )
+
+    return output
 
 app = FastAPI(
     title="NSE Stock Tracker API",
@@ -1864,7 +1979,37 @@ async def scan_market_v2(
 )
 async def get_live_candles(
     symbol: str,
+    interval: str = "5m",
+    session: AsyncSession = Depends(
+        get_session
+    ),
 ) -> dict[str, Any]:
+
+    symbol_upper = (
+        symbol
+        .strip()
+        .upper()
+    )
+
+    allowed = {
+        "15s",
+        "1m",
+        "5m",
+        "15m",
+        "1D",
+        "1W",
+        "1M",
+    }
+
+    if interval not in allowed:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Interval must be "
+                "15s, 1m, 5m, 15m, "
+                "1D, 1W or 1M"
+            ),
+        )
 
     engine = getattr(
         app.state,
@@ -1873,7 +2018,6 @@ async def get_live_candles(
     )
 
     if engine is None:
-
         raise HTTPException(
             status_code=503,
             detail=(
@@ -1882,9 +2026,121 @@ async def get_live_candles(
             ),
         )
 
-    return engine.snapshot(
-        symbol
+    instrument = await resolve_instrument(
+        session,
+        symbol_upper,
     )
+
+    provider = market()
+
+    live_snapshot = (
+        engine.snapshot(
+            symbol_upper
+        )
+    )
+
+    fifteen_second = (
+        live_snapshot.get(
+            "15s",
+            [],
+        )
+    )
+    try:
+        one_minute = (
+            await provider
+            .historical_candles(
+                instrument.symbol,
+                "1m",
+                instrument.token,
+                2,
+            )
+        )
+
+        await asyncio.sleep(
+            0.4
+        )
+
+        five_minute = (
+            await provider
+            .historical_candles(
+                instrument.symbol,
+                "5m",
+                instrument.token,
+                5,
+            )
+        )
+
+        await asyncio.sleep(
+            0.4
+        )
+
+        fifteen_minute = (
+            await provider
+            .historical_candles(
+                instrument.symbol,
+                "15m",
+                instrument.token,
+                10,
+            )
+        )
+
+        await asyncio.sleep(
+            0.4
+        )
+
+        daily = (
+            await provider
+            .historical_candles(
+                instrument.symbol,
+                "1D",
+                instrument.token,
+                365,
+            )
+        )
+
+        weekly = aggregate_weekly(
+            daily
+        )
+
+        monthly = aggregate_monthly(
+            daily
+        )
+
+        return {
+            "symbol":
+                instrument.symbol,
+
+            "15s":
+                fifteen_second,
+
+            "1m":
+                one_minute,
+
+            "5m":
+                five_minute,
+
+            "15m":
+                fifteen_minute,
+
+            "1D":
+                daily,
+
+            "1W":
+                weekly,
+
+            "1M":
+                monthly,
+        }
+
+    except Exception as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                "Live candle fetch "
+                f"failed for "
+                f"{symbol_upper}: {exc}"
+            ),
+        ) from exc
 
 @app.websocket("/api/ws/market")
 async def market_socket(

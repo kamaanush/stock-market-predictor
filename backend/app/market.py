@@ -21,6 +21,7 @@ INTERVAL_MAP = {
     "1m": "ONE_MINUTE",
     "5m": "FIVE_MINUTE",
     "15m": "FIFTEEN_MINUTE",
+    "1D": "ONE_DAY",
 }
 
 

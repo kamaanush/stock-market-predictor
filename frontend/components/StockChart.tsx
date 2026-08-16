@@ -12,6 +12,7 @@ import {
   UTCTimestamp,
 } from "lightweight-charts";
 
+
 export type Candle = {
   time: number;
   open: number;
@@ -20,6 +21,11 @@ export type Candle = {
   close: number;
   volume: number;
 };
+
+
+// ==================================================
+// EMA
+// ==================================================
 
 function ema(
   values: Candle[],
@@ -41,18 +47,27 @@ function ema(
       return {
         time:
           item.time as UTCTimestamp,
-        value: previous,
+
+        value:
+          previous,
       };
     },
   );
 }
+
+
+// ==================================================
+// TIME FORMAT
+// ==================================================
 
 function formatIstTime(
   timestamp: number,
   interval: string,
 ) {
   const date =
-    new Date(timestamp * 1000);
+    new Date(
+      timestamp * 1000
+    );
 
   if (
     interval === "15s" ||
@@ -65,53 +80,206 @@ function formatIstTime(
       {
         timeZone:
           "Asia/Kolkata",
-        hour: "2-digit",
-        minute: "2-digit",
+
+        hour:
+          "2-digit",
+
+        minute:
+          "2-digit",
+
         second:
           interval === "15s"
             ? "2-digit"
             : undefined,
-        hour12: false,
+
+        hour12:
+          false,
       },
-    ).format(date);
+    ).format(
+      date
+    );
   }
+
+
+  if (
+    interval === "1D"
+  ) {
+    return new Intl.DateTimeFormat(
+      "en-IN",
+      {
+        timeZone:
+          "Asia/Kolkata",
+
+        day:
+          "2-digit",
+
+        month:
+          "short",
+      },
+    ).format(
+      date
+    );
+  }
+
+
+  if (
+    interval === "1W"
+  ) {
+    return new Intl.DateTimeFormat(
+      "en-IN",
+      {
+        timeZone:
+          "Asia/Kolkata",
+
+        day:
+          "2-digit",
+
+        month:
+          "short",
+      },
+    ).format(
+      date
+    );
+  }
+
 
   return new Intl.DateTimeFormat(
     "en-IN",
     {
       timeZone:
         "Asia/Kolkata",
-      day: "2-digit",
-      month: "short",
+
+      month:
+        "short",
+
+      year:
+        "2-digit",
     },
-  ).format(date);
+  ).format(
+    date
+  );
 }
+
+
+// ==================================================
+// CROSSHAIR FORMAT
+// ==================================================
 
 function formatIstCrosshairTime(
   timestamp: number,
   interval: string,
 ) {
   const date =
-    new Date(timestamp * 1000);
+    new Date(
+      timestamp * 1000
+    );
+
+  const intraday =
+    interval === "15s" ||
+    interval === "1m" ||
+    interval === "5m" ||
+    interval === "15m";
+
+
+  if (
+    intraday
+  ) {
+    return new Intl.DateTimeFormat(
+      "en-IN",
+      {
+        timeZone:
+          "Asia/Kolkata",
+
+        day:
+          "2-digit",
+
+        month:
+          "short",
+
+        year:
+          "numeric",
+
+        hour:
+          "2-digit",
+
+        minute:
+          "2-digit",
+
+        second:
+          interval === "15s"
+            ? "2-digit"
+            : undefined,
+
+        hour12:
+          false,
+      },
+    ).format(
+      date
+    );
+  }
+
 
   return new Intl.DateTimeFormat(
     "en-IN",
     {
       timeZone:
         "Asia/Kolkata",
-      day: "2-digit",
-      month: "short",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-      second:
-        interval === "15s"
-          ? "2-digit"
-          : undefined,
-      hour12: false,
+
+      day:
+        "2-digit",
+
+      month:
+        "short",
+
+      year:
+        "numeric",
     },
-  ).format(date);
+  ).format(
+    date
+  );
 }
+
+
+// ==================================================
+// BAR SPACING
+// ==================================================
+
+function getBarSpacing(
+  interval: string,
+) {
+  switch (
+    interval
+  ) {
+    case "15s":
+      return 10;
+
+    case "1m":
+      return 9;
+
+    case "5m":
+      return 10;
+
+    case "15m":
+      return 11;
+
+    case "1D":
+      return 12;
+
+    case "1W":
+      return 14;
+
+    case "1M":
+      return 16;
+
+    default:
+      return 10;
+  }
+}
+
+
+// ==================================================
+// CHART
+// ==================================================
 
 export default function StockChart({
   data,
@@ -120,243 +288,470 @@ export default function StockChart({
   data: Candle[];
   interval?: string;
 }) {
+
   const target =
-    useRef<HTMLDivElement>(
-      null,
+    useRef<
+      HTMLDivElement
+    >(
+      null
     );
+
 
   const visibleRangeRef =
     useRef<{
       from: number;
       to: number;
-    } | null>(null);
-
-  useEffect(() => {
-    if (!target.current) {
-      return;
-    }
-
-    const chart =
-      createChart(
-        target.current,
-        {
-          autoSize: true,
-          height: 430,
-
-          layout: {
-            background: {
-              type:
-                ColorType.Solid,
-              color:
-                "#0b120d",
-            },
-            textColor:
-              "#8ba28f",
-          },
-
-          grid: {
-            vertLines: {
-              color:
-                "#142317",
-            },
-            horzLines: {
-              color:
-                "#142317",
-            },
-          },
-
-          rightPriceScale: {
-            borderColor:
-              "#1c3321",
-          },
-
-          timeScale: {
-            borderColor:
-              "#1c3321",
-
-            timeVisible: true,
-
-            secondsVisible:
-              interval ===
-              "15s",
-
-            tickMarkFormatter: (
-              time: number,
-              _tickMarkType: TickMarkType,
-            ) => {
-              if (
-                typeof time ===
-                "number"
-              ) {
-                return formatIstTime(
-                  time,
-                  interval,
-                );
-              }
-
-              return "";
-            },
-
-            rightOffset: 4,
-            barSpacing:
-              interval === "15s"
-                ? 8
-                : interval === "1m"
-                  ? 7
-                  : interval === "5m"
-                    ? 8
-                    : 9,
-          },
-
-          localization: {
-            timeFormatter: (
-               time: number,
-              ) => {
-              if (
-                typeof time ===
-                "number"
-              ) {
-                return formatIstCrosshairTime(
-                  time,
-                  interval,
-                );
-              }
-
-              return "";
-            },
-          },
-        },
-      );
-
-    const candles =
-      chart
-        .addCandlestickSeries({
-          upColor:
-            "#36ef75",
-          downColor:
-            "#f25d6b",
-          borderVisible:
-            false,
-          wickUpColor:
-            "#36ef75",
-          wickDownColor:
-            "#f25d6b",
-        });
-
-    const volume =
-      chart
-        .addHistogramSeries({
-          priceFormat: {
-            type: "volume",
-          },
-          priceScaleId:
-            "volume",
-          color:
-            "#1c9c4a",
-        });
-
-    volume
-      .priceScale()
-      .applyOptions({
-        scaleMargins: {
-          top: 0.8,
-          bottom: 0,
-        },
-      });
-
-    const movingAverage =
-      chart
-        .addLineSeries({
-          color:
-            "#f5c451",
-          lineWidth: 2,
-          title:
-            "EMA 20",
-        });
-
-    const normalizedData =
-      data.map(
-        (item) => ({
-          ...item,
-          time:
-            item.time as UTCTimestamp,
-        }),
-      );
-
-    candles.setData(
-      normalizedData,
+    } | null>(
+      null
     );
 
-    volume.setData(
-      normalizedData.map(
-        (item) => ({
-          time: item.time,
-          value:
-            item.volume,
-          color:
-            item.close >=
-            item.open
-              ? "#1d8d46"
-              : "#7f3540",
-        }),
-      ),
-    );
 
-    movingAverage.setData(
-      ema(data),
-    );
+  useEffect(
+    () => {
 
-    const timeScale =
-      chart.timeScale();
-
-    const savedRange =
-      visibleRangeRef.current;
-
-    if (savedRange) {
-      timeScale.setVisibleLogicalRange(
-        savedRange,
-      );
-    } else {
-      timeScale.fitContent();
-    }
-
-    const handleVisibleRangeChange = (
-      range:
-        | {
-            from: number;
-            to: number;
-          }
-        | null,
-    ) => {
-      if (range) {
-        visibleRangeRef.current = {
-          from: range.from,
-          to: range.to,
-        };
+      if (
+        !target.current
+      ) {
+        return;
       }
-    };
 
-    timeScale.subscribeVisibleLogicalRangeChange(
-      handleVisibleRangeChange,
-    );
 
-    return () => {
-      timeScale.unsubscribeVisibleLogicalRangeChange(
-        handleVisibleRangeChange,
+      const chart =
+        createChart(
+          target.current,
+          {
+            autoSize:
+              true,
+
+            height:
+              430,
+
+
+            // ======================================
+            // BACKGROUND
+            // ======================================
+
+            layout: {
+              background: {
+                type:
+                  ColorType.Solid,
+
+                color:
+                  "#07100b",
+              },
+
+              textColor:
+                "#8da294",
+            },
+
+
+            // ======================================
+            // GRID
+            // ======================================
+
+            grid: {
+              vertLines: {
+                color:
+                  "#122319",
+              },
+
+              horzLines: {
+                color:
+                  "#122319",
+              },
+            },
+
+
+            // ======================================
+            // PRICE SCALE
+            // ======================================
+
+            rightPriceScale: {
+              borderColor:
+                "#1d3525",
+
+              scaleMargins: {
+                top:
+                  0.08,
+
+                bottom:
+                  0.18,
+              },
+            },
+
+
+            // ======================================
+            // TIME SCALE
+            // ======================================
+
+           timeScale: {
+  borderColor: "#1d3525",
+
+  timeVisible: true,
+
+  secondsVisible:
+    interval === "15s",
+
+  rightOffset: 6,
+
+  barSpacing:
+    interval === "15s"
+      ? 10
+      : interval === "1m"
+        ? 12
+        : interval === "5m"
+          ? 14
+          : interval === "15m"
+            ? 16
+            : interval === "1D"
+              ? 18
+              : interval === "1W"
+                ? 20
+                : interval === "1M"
+                  ? 22
+                  : 12,
+
+  minBarSpacing: 8,
+
+  fixLeftEdge: false,
+
+  fixRightEdge: false,
+
+  lockVisibleTimeRangeOnResize:
+    false,
+
+  rightBarStaysOnScroll:
+    true,
+
+  tickMarkFormatter: (
+    time: number,
+    _tickMarkType:
+      TickMarkType,
+  ) => {
+    if (
+      typeof time ===
+      "number"
+    ) {
+      return formatIstTime(
+        time,
+        interval,
+      );
+    }
+
+    return "";
+  },
+},
+
+
+            // ======================================
+            // CROSSHAIR
+            // ======================================
+
+            crosshair: {
+              vertLine: {
+                color:
+                  "#557065",
+
+                width:
+                  1,
+
+                labelBackgroundColor:
+                  "#263a31",
+              },
+
+              horzLine: {
+                color:
+                  "#557065",
+
+                width:
+                  1,
+
+                labelBackgroundColor:
+                  "#263a31",
+              },
+            },
+
+
+            // ======================================
+            // LOCALIZATION
+            // ======================================
+
+            localization: {
+              timeFormatter: (
+                time: number,
+              ) => {
+
+                if (
+                  typeof time ===
+                  "number"
+                ) {
+                  return formatIstCrosshairTime(
+                    time,
+                    interval,
+                  );
+                }
+
+                return "";
+              },
+            },
+          },
+        );
+
+
+      // ============================================
+      // ANGEL ONE STYLE CANDLES
+      // ============================================
+
+const candles =
+  chart.addCandlestickSeries({
+    upColor: "#00c853",
+    downColor: "#ff1744",
+
+    borderVisible: true,
+    borderUpColor: "#00c853",
+    borderDownColor: "#ff1744",
+
+    wickUpColor: "#00c853",
+    wickDownColor: "#ff1744",
+
+    priceLineVisible: true,
+    lastValueVisible: true,
+
+    priceFormat: {
+      type: "price",
+      precision: 2,
+      minMove: 0.05,
+    },
+  });
+
+
+      // ============================================
+      // VOLUME
+      // ============================================
+
+      const volume =
+        chart
+          .addHistogramSeries({
+            priceFormat: {
+              type:
+                "volume",
+            },
+
+            priceScaleId:
+              "volume",
+          });
+
+
+      volume
+        .priceScale()
+        .applyOptions({
+          scaleMargins: {
+            top:
+              0.82,
+
+            bottom:
+              0,
+          },
+        });
+
+
+      // ============================================
+      // EMA 20
+      // ============================================
+
+      const movingAverage =
+        chart
+          .addLineSeries({
+            color:
+              "#F5C451",
+
+            lineWidth:
+              2,
+
+            title:
+              "EMA 20",
+
+            priceLineVisible:
+              false,
+
+            lastValueVisible:
+              true,
+          });
+
+
+      // ============================================
+      // NORMALIZE DATA
+      // ============================================
+
+      const normalizedData =
+        data.map(
+          (
+            item
+          ) => ({
+            ...item,
+
+            time:
+              item.time as
+                UTCTimestamp,
+          }),
+        );
+
+
+      // ============================================
+      // SET CANDLE DATA
+      // ============================================
+
+      candles.setData(
+        normalizedData,
       );
 
-      chart.remove();
-    };
-  }, [
-    data,
-    interval,
-  ]);
+
+      // ============================================
+      // SET VOLUME DATA
+      // ============================================
+
+      volume.setData(
+        normalizedData.map(
+          (
+            item
+          ) => ({
+            time:
+              item.time,
+
+            value:
+              item.volume,
+
+            color:
+              item.close >=
+              item.open
+                ? "rgba(0,179,134,0.45)"
+                : "rgba(235,91,91,0.45)",
+          }),
+        ),
+      );
+
+
+      // ============================================
+      // EMA
+      // ============================================
+
+      movingAverage.setData(
+        ema(
+          data
+        ),
+      );
+
+
+      const timeScale =
+        chart.timeScale();
+
+
+      const savedRange =
+        visibleRangeRef
+          .current;
+
+
+      if (
+        savedRange
+      ) {
+        timeScale
+          .setVisibleLogicalRange(
+            savedRange,
+          );
+      } else {
+
+        if (
+          data.length >
+          80
+        ) {
+
+          timeScale
+            .setVisibleLogicalRange({
+              from:
+                data.length -
+                70,
+
+              to:
+                data.length +
+                5,
+            });
+
+        } else {
+
+          timeScale
+            .fitContent();
+        }
+      }
+
+
+      // ============================================
+      // SAVE ZOOM POSITION
+      // ============================================
+
+      const handleVisibleRangeChange =
+        (
+          range:
+            | {
+                from:
+                  number;
+
+                to:
+                  number;
+              }
+            | null,
+        ) => {
+
+          if (
+            range
+          ) {
+            visibleRangeRef
+              .current = {
+                from:
+                  range.from,
+
+                to:
+                  range.to,
+              };
+          }
+        };
+
+
+      timeScale
+        .subscribeVisibleLogicalRangeChange(
+          handleVisibleRangeChange,
+        );
+
+
+      return () => {
+
+        timeScale
+          .unsubscribeVisibleLogicalRangeChange(
+            handleVisibleRangeChange,
+          );
+
+        chart.remove();
+      };
+
+    },
+    [
+      data,
+      interval,
+    ],
+  );
+
 
   return (
     <div
-      ref={target}
-      className="w-full"
-      aria-label={`Candlestick chart for ${interval} candles with EMA 20 and volume`}
+      ref={
+        target
+      }
+
+      className=
+        "w-full"
+
+      aria-label={
+        `Candlestick chart for ${interval} candles with EMA 20 and volume`
+      }
     />
   );
 }
