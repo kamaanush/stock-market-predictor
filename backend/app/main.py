@@ -3,7 +3,7 @@ import csv
 import hmac
 import io
 from contextlib import asynccontextmanager, suppress
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Optional, Union
 
 import httpx
@@ -63,6 +63,14 @@ from .services.backtester import (
 )
 from .services.live_market import LiveMarketTracker
 from .services.live_candles import LiveCandleEngine
+from .services.live_market import LiveMarketTracker
+from .services.live_candles import LiveCandleEngine
+
+from .services.candle_history import (
+    latest_candle_time,
+    load_candles,
+    save_candles,
+)
 
 SCRIP_MASTER_URL = (
     "https://margincalculator.angelone.in/"
@@ -1984,6 +1992,489 @@ async def get_live_candles(
         get_session
     ),
 ) -> dict[str, Any]:
+
+    symbol_upper = (
+        symbol
+        .strip()
+        .upper()
+    )
+
+    allowed = {
+        "15s",
+        "1m",
+        "5m",
+        "15m",
+        "1D",
+        "1W",
+        "1M",
+    }
+
+    if interval not in allowed:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Interval must be "
+                "15s, 1m, 5m, 15m, "
+                "1D, 1W or 1M"
+            ),
+        )
+
+    engine = getattr(
+        app.state,
+        "live_candles",
+        None,
+    )
+
+    if engine is None:
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "Live candle engine "
+                "is not available"
+            ),
+        )
+
+    instrument = await resolve_instrument(
+        session,
+        symbol_upper,
+    )
+
+    provider = market()
+
+    # ==============================================
+    # 15 SECOND LIVE CANDLES
+    # ==============================================
+
+    if interval == "15s":
+
+        snapshot = (
+            engine.snapshot(
+                symbol_upper
+            )
+        )
+
+        return {
+            "symbol":
+                instrument.symbol,
+
+            "15s":
+                snapshot.get(
+                    "15s",
+                    [],
+                ),
+        }
+
+    try:
+
+        # ==========================================
+        # 1 MINUTE
+        # ==========================================
+
+        if interval == "1m":
+
+            latest = await latest_candle_time(
+                session,
+                symbol=instrument.symbol,
+                interval="1m",
+            )
+
+            # First-ever load: fetch a few days.
+            # Later loads: only fetch a small overlapping
+            # window so new candles are appended.
+            if latest is None:
+                days_to_fetch = 5
+            else:
+                now_utc = datetime.now(
+                    timezone.utc
+                )
+
+                elapsed_days = max(
+                    1,
+                    (
+                        now_utc
+                        - latest
+                    ).days
+                    + 1,
+                )
+
+                # Keep the incremental request small,
+                # but include overlap for safe updates.
+                days_to_fetch = min(
+                    max(
+                        elapsed_days,
+                        2,
+                    ),
+                    5,
+                )
+
+            candles = await (
+                provider
+                .historical_candles(
+                    instrument.symbol,
+                    "1m",
+                    instrument.token,
+                    days=days_to_fetch,
+                )
+            )
+
+            await save_candles(
+                session,
+                symbol=instrument.symbol,
+                interval="1m",
+                candles=candles,
+            )
+
+            stored = await load_candles(
+                session,
+                symbol=instrument.symbol,
+                interval="1m",
+            )
+
+            return {
+                "symbol":
+                    instrument.symbol,
+                "1m":
+                    stored,
+            }
+
+        # ==========================================
+        # 5 MINUTES
+        # ==========================================
+
+        if interval == "5m":
+
+            latest = await latest_candle_time(
+                session,
+                symbol=instrument.symbol,
+                interval="5m",
+            )
+
+            if latest is None:
+                days_to_fetch = 10
+            else:
+                now_utc = datetime.now(
+                    timezone.utc
+                )
+
+                elapsed_days = max(
+                    1,
+                    (
+                        now_utc
+                        - latest
+                    ).days
+                    + 1,
+                )
+
+                days_to_fetch = min(
+                    max(
+                        elapsed_days,
+                        2,
+                    ),
+                    10,
+                )
+
+            candles = await (
+                provider
+                .historical_candles(
+                    instrument.symbol,
+                    "5m",
+                    instrument.token,
+                    days=days_to_fetch,
+                )
+            )
+
+            await save_candles(
+                session,
+                symbol=instrument.symbol,
+                interval="5m",
+                candles=candles,
+            )
+
+            stored = await load_candles(
+                session,
+                symbol=instrument.symbol,
+                interval="5m",
+            )
+
+            return {
+                "symbol":
+                    instrument.symbol,
+                "5m":
+                    stored,
+            }
+
+        # ==========================================
+        # 15 MINUTES
+        # ==========================================
+
+        if interval == "15m":
+
+            latest = await latest_candle_time(
+                session,
+                symbol=instrument.symbol,
+                interval="15m",
+            )
+
+            if latest is None:
+                days_to_fetch = 30
+            else:
+                now_utc = datetime.now(
+                    timezone.utc
+                )
+
+                elapsed_days = max(
+                    1,
+                    (
+                        now_utc
+                        - latest
+                    ).days
+                    + 1,
+                )
+
+                days_to_fetch = min(
+                    max(
+                        elapsed_days,
+                        2,
+                    ),
+                    30,
+                )
+
+            candles = await (
+                provider
+                .historical_candles(
+                    instrument.symbol,
+                    "15m",
+                    instrument.token,
+                    days=days_to_fetch,
+                )
+            )
+
+            await save_candles(
+                session,
+                symbol=instrument.symbol,
+                interval="15m",
+                candles=candles,
+            )
+
+            stored = await load_candles(
+                session,
+                symbol=instrument.symbol,
+                interval="15m",
+            )
+
+            return {
+                "symbol":
+                    instrument.symbol,
+                "15m":
+                    stored,
+            }
+
+
+        # ==========================================
+        # DAILY
+        # ==========================================
+
+        if interval == "1D":
+
+            latest = await latest_candle_time(
+                session,
+                symbol=instrument.symbol,
+                interval="1D",
+            )
+
+            if latest is None:
+                days_to_fetch = 365
+            else:
+                now_utc = datetime.now(
+                    timezone.utc
+                )
+
+                elapsed_days = max(
+                    1,
+                    (
+                        now_utc
+                        - latest
+                    ).days
+                    + 1,
+                )
+
+                days_to_fetch = min(
+                    max(
+                        elapsed_days,
+                        2,
+                    ),
+                    365,
+                )
+
+            daily = await (
+                provider
+                .historical_candles(
+                    instrument.symbol,
+                    "1D",
+                    instrument.token,
+                    days=days_to_fetch,
+                )
+            )
+
+            await save_candles(
+                session,
+                symbol=instrument.symbol,
+                interval="1D",
+                candles=daily,
+            )
+
+            stored = await load_candles(
+                session,
+                symbol=instrument.symbol,
+                interval="1D",
+            )
+
+            return {
+                "symbol":
+                    instrument.symbol,
+                "1D":
+                    stored,
+            }
+        # ==========================================
+        # WEEKLY
+        # ==========================================
+
+        if interval == "1W":
+
+            stored_daily = await load_candles(
+                session,
+                symbol=instrument.symbol,
+                interval="1D",
+            )
+
+            # About 5 years of trading days.
+            # Backfill only when we do not yet have
+            # enough permanent daily history.
+            if len(stored_daily) < 1000:
+
+                daily_history = await (
+                    provider
+                    .long_daily_history(
+                        instrument.symbol,
+                        instrument.token,
+                        days=365 * 5,
+                    )
+                )
+
+                await save_candles(
+                    session,
+                    symbol=instrument.symbol,
+                    interval="1D",
+                    candles=daily_history,
+                )
+
+                stored_daily = await load_candles(
+                    session,
+                    symbol=instrument.symbol,
+                    interval="1D",
+                )
+
+            weekly = aggregate_weekly(
+                stored_daily
+            )
+
+            return {
+                "symbol":
+                    instrument.symbol,
+
+                "1W":
+                    weekly,
+            }
+
+        # ==========================================
+        # MONTHLY
+        # ==========================================
+
+        if interval == "1M":
+
+            stored_daily = await load_candles(
+                session,
+                symbol=instrument.symbol,
+                interval="1D",
+            )
+
+            print(
+                "[1M] Stored daily before backfill:",
+                instrument.symbol,
+                len(stored_daily),
+            )
+
+            if len(stored_daily) < 2000:
+
+                print(
+                    "[1M] Starting 10-year backfill:",
+                    instrument.symbol,
+                )
+
+                daily_history = await (
+                    provider
+                    .long_daily_history(
+                        instrument.symbol,
+                        instrument.token,
+                        days=365 * 10,
+                    )
+                )
+
+                print(
+                    "[1M] Angel One returned:",
+                    len(daily_history),
+                    "daily candles",
+                )
+
+                saved_count = await save_candles(
+                    session,
+                    symbol=instrument.symbol,
+                    interval="1D",
+                    candles=daily_history,
+                )
+
+                print(
+                    "[1M] New DB rows saved:",
+                    saved_count,
+                )
+
+                stored_daily = await load_candles(
+                    session,
+                    symbol=instrument.symbol,
+                    interval="1D",
+                )
+
+                print(
+                    "[1M] Stored daily after backfill:",
+                    len(stored_daily),
+                )
+
+            monthly = aggregate_monthly(
+                stored_daily
+            )
+
+            print(
+                "[1M] Monthly candles:",
+                len(monthly),
+            )
+
+            return {
+                "symbol":
+                    instrument.symbol,
+
+                "1M":
+                    monthly,
+            }
+    except Exception as exc:
+
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                "Live candle fetch failed "
+                f"for {symbol_upper} "
+                f"({interval}): {exc}"
+            ),
+        ) from exc
 
     symbol_upper = (
         symbol

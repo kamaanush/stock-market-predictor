@@ -91,3 +91,61 @@ class AlertEvent(Base):
     message: Mapped[str] = mapped_column(String(500))
     delivery: Mapped[str] = mapped_column(String(16))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+class CandleHistory(Base):
+    __tablename__ = "candle_history"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "symbol",
+            "interval",
+            "timestamp",
+            name="uq_candle_history_symbol_interval_timestamp",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+    )
+
+    symbol: Mapped[str] = mapped_column(
+        String(64),
+        index=True,
+    )
+
+    interval: Mapped[str] = mapped_column(
+        String(8),
+        index=True,
+    )
+
+    timestamp: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        index=True,
+    )
+
+    open: Mapped[float] = mapped_column(
+        Float,
+    )
+
+    high: Mapped[float] = mapped_column(
+        Float,
+    )
+
+    low: Mapped[float] = mapped_column(
+        Float,
+    )
+
+    close: Mapped[float] = mapped_column(
+        Float,
+    )
+
+    volume: Mapped[float] = mapped_column(
+        Float,
+        default=0.0,
+    )
+
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+    )

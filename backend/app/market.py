@@ -271,6 +271,7 @@ class DemoMarketData:
             "1m",
             "5m",
             "15m",
+            "1D",
         }:
             raise ValueError(
                 "Unsupported interval"
@@ -280,18 +281,21 @@ class DemoMarketData:
             "1m": 60,
             "5m": 300,
             "15m": 900,
+            "1D": 86400,
         }[interval]
 
         timeframe_factor = {
             "1m": 1.0,
             "5m": 1.6,
             "15m": 2.3,
+            "1D": 3.2,
         }[interval]
 
         wave_speed = {
             "1m": 6.5,
             "5m": 10.0,
             "15m": 15.0,
+            "1D": 22.0,
         }[interval]
 
         now = datetime.now(
@@ -513,6 +517,13 @@ class DemoMarketData:
 class AngelOneMarketData:
     """
     Read-only SmartAPI market-data client.
+
+    Historical candle requests are protected by:
+    - a shared in-memory cache,
+    - one async request lock,
+    - minimum spacing between SmartAPI requests,
+    - invalid-token re-authentication,
+    - retry/backoff for transient rate-limit/time-out failures.
     """
 
     def __init__(
@@ -542,6 +553,18 @@ class AngelOneMarketData:
             FifteenSecondAggregator()
         )
 
+        self._candle_cache: dict[
+            tuple[str, str, int],
+            tuple[
+                float,
+                list[dict[str, float]],
+            ],
+        ] = {}
+
+        self._candle_lock = asyncio.Lock()
+        self._last_candle_request = 0.0
+        self._minimum_request_gap = 1.5
+
     def _login(
         self,
     ) -> None:
@@ -559,12 +582,10 @@ class AngelOneMarketData:
         )
 
         if not response.get("status"):
-
             message = response.get(
                 "message",
                 "unknown error",
             )
-
             raise RuntimeError(
                 "SmartAPI login failed: "
                 + str(message)
@@ -610,6 +631,7 @@ class AngelOneMarketData:
     def _is_invalid_token(
         response: dict,
     ) -> bool:
+
         if response.get("status"):
             return False
 
@@ -625,6 +647,456 @@ class AngelOneMarketData:
             or "token is invalid" in message
             or "token expired" in message
         )
+
+    @staticmethod
+    def _cache_ttl(
+        interval: str,
+    ) -> float:
+
+        return {
+            "1m": 30.0,
+            "5m": 60.0,
+            "15m": 120.0,
+            "1D": 300.0,
+        }.get(
+            interval,
+            60.0,
+        )
+
+    @staticmethod
+    def _is_transient_candle_error(
+        exc: Exception,
+    ) -> bool:
+
+        message = str(exc).lower()
+
+        transient_fragments = (
+            "exceeding access rate",
+            "too many requests",
+            "rate limit",
+            "couldn't parse the json response",
+            "could not parse the json response",
+            "connecttimeout",
+            "connection timed out",
+            "read timed out",
+            "max retries exceeded",
+            "temporarily unavailable",
+        )
+
+        return any(
+            fragment in message
+            for fragment in transient_fragments
+        )
+
+    def _fetch_candle_payload_sync(
+        self,
+        *,
+        symbol: str,
+        token: str,
+        interval: str,
+        days: Optional[int] = None,
+        from_date: Optional[datetime] = None,
+        to_date: Optional[datetime] = None,
+    ) -> list[
+        dict[str, float]
+    ]:
+
+        if interval not in INTERVAL_MAP:
+            raise ValueError(
+                "Unsupported interval"
+            )
+
+        if (
+            from_date is not None
+            and to_date is not None
+        ):
+            start_date = from_date
+            end_date = to_date
+
+        else:
+            if days is None:
+                raise ValueError(
+                    "days is required when "
+                    "from_date/to_date are not supplied"
+                )
+
+            if days < 1:
+                raise ValueError(
+                    "Days must be at least 1"
+                )
+
+            end_date = datetime.now(IST)
+            start_date = (
+                end_date
+                - timedelta(days=days)
+            )
+
+        payload = {
+            "exchange": "NSE",
+            "symboltoken": token,
+            "interval": INTERVAL_MAP[
+                interval
+            ],
+            "fromdate": start_date.strftime(
+                "%Y-%m-%d %H:%M"
+            ),
+            "todate": end_date.strftime(
+                "%Y-%m-%d %H:%M"
+            ),
+        }
+
+        print(
+            "[SmartAPI candles]",
+            symbol,
+            interval,
+            payload["fromdate"],
+            "->",
+            payload["todate"],
+        )
+
+        response = (
+            self.client
+            .getCandleData(payload)
+        )
+
+        if self._is_invalid_token(
+            response
+        ):
+            print(
+                "[SmartAPI] Token invalid for "
+                f"{symbol}. Re-authenticating..."
+            )
+
+            self._login()
+
+            response = (
+                self.client
+                .getCandleData(payload)
+            )
+
+        if not response.get(
+            "status"
+        ):
+            raise RuntimeError(
+                response.get(
+                    "message",
+                    (
+                        "Unable to fetch "
+                        "historical candles"
+                    ),
+                )
+            )
+
+        return self._parse_candles(
+            response
+        )
+
+    async def _get_cached_candles(
+        self,
+        *,
+        symbol: str,
+        interval: str,
+        token: str,
+        days: int,
+    ) -> list[
+        dict[str, float]
+    ]:
+
+        if interval not in INTERVAL_MAP:
+            raise ValueError(
+                "Unsupported interval"
+            )
+
+        if days < 1:
+            raise ValueError(
+                "Days must be at least 1"
+            )
+
+        cache_key = (
+            symbol.upper(),
+            interval,
+            days,
+        )
+
+        cache_ttl = (
+            self._cache_ttl(
+                interval
+            )
+        )
+
+        loop = asyncio.get_running_loop()
+        now_ts = loop.time()
+
+        cached = self._candle_cache.get(
+            cache_key
+        )
+
+        if cached is not None:
+            cached_at, cached_data = cached
+
+            if (
+                now_ts
+                - cached_at
+                < cache_ttl
+            ):
+                return cached_data
+
+        async with self._candle_lock:
+
+            now_ts = loop.time()
+
+            cached = self._candle_cache.get(
+                cache_key
+            )
+
+            if cached is not None:
+                cached_at, cached_data = (
+                    cached
+                )
+
+                if (
+                    now_ts
+                    - cached_at
+                    < cache_ttl
+                ):
+                    return cached_data
+
+            elapsed = (
+                now_ts
+                - self._last_candle_request
+            )
+
+            if (
+                elapsed
+                < self._minimum_request_gap
+            ):
+                await asyncio.sleep(
+                    self._minimum_request_gap
+                    - elapsed
+                )
+
+            last_error: Optional[Exception] = (
+                None
+            )
+
+            for attempt in range(3):
+                try:
+                    data = (
+                        await asyncio.to_thread(
+                            self._fetch_candle_payload_sync,
+                            symbol=symbol,
+                            token=token,
+                            interval=interval,
+                            days=days,
+                        )
+                    )
+
+                    request_finished = (
+                        loop.time()
+                    )
+
+                    self._last_candle_request = (
+                        request_finished
+                    )
+
+                    self._candle_cache[
+                        cache_key
+                    ] = (
+                        request_finished,
+                        data,
+                    )
+
+                    return data
+
+                except Exception as exc:
+                    last_error = exc
+
+                    self._last_candle_request = (
+                        loop.time()
+                    )
+
+                    if (
+                        not self._is_transient_candle_error(
+                            exc
+                        )
+                        or attempt >= 2
+                    ):
+                        raise
+
+                    delay = 2.0 * (
+                        attempt + 1
+                    )
+
+                    print(
+                        "[SmartAPI] Candle request "
+                        f"for {symbol} {interval} "
+                        f"was throttled/transient. "
+                        f"Retrying in {delay:.1f}s..."
+                    )
+
+                    await asyncio.sleep(
+                        delay
+                    )
+
+            if last_error is not None:
+                raise last_error
+
+            raise RuntimeError(
+                "Unable to fetch candles"
+            )
+
+    async def long_daily_history(
+        self,
+        symbol: str,
+        token: str,
+        days: int = 3650,
+    ) -> list[
+        dict[str, float]
+    ]:
+        """
+        Fetch long daily history in smaller
+        date chunks for weekly/monthly charts.
+        """
+
+        if days < 1:
+            raise ValueError(
+                "Days must be at least 1"
+            )
+
+        end_date = datetime.now(IST)
+        start_date = (
+            end_date
+            - timedelta(days=days)
+        )
+
+        all_candles: list[
+            dict[str, float]
+        ] = []
+
+        # Six-month chunks keep requests small
+        # while avoiding excessive API calls.
+        chunk_days = 180
+
+        current_start = start_date
+        loop = asyncio.get_running_loop()
+
+        while current_start < end_date:
+            current_end = min(
+                current_start
+                + timedelta(days=chunk_days),
+                end_date,
+            )
+
+            async with self._candle_lock:
+                now_ts = loop.time()
+
+                elapsed = (
+                    now_ts
+                    - self._last_candle_request
+                )
+
+                if (
+                    elapsed
+                    < self._minimum_request_gap
+                ):
+                    await asyncio.sleep(
+                        self._minimum_request_gap
+                        - elapsed
+                    )
+
+                last_error: Optional[Exception] = None
+                candles: list[
+                    dict[str, float]
+                ] = []
+
+                for attempt in range(3):
+                    try:
+                        candles = (
+                            await asyncio.to_thread(
+                                self._fetch_candle_payload_sync,
+                                symbol=symbol,
+                                token=token,
+                                interval="1D",
+                                from_date=current_start,
+                                to_date=current_end,
+                            )
+                        )
+
+                        self._last_candle_request = (
+                            loop.time()
+                        )
+
+                        all_candles.extend(
+                            candles
+                        )
+                        break
+
+                    except Exception as exc:
+                        last_error = exc
+                        self._last_candle_request = (
+                            loop.time()
+                        )
+
+                        if (
+                            not
+                            self._is_transient_candle_error(
+                                exc
+                            )
+                            or attempt >= 2
+                        ):
+                            raise
+
+                        delay = 2.0 * (
+                            attempt + 1
+                        )
+
+                        print(
+                            "[SmartAPI] Long-history retry:",
+                            symbol,
+                            current_start.date(),
+                            "->",
+                            current_end.date(),
+                            f"in {delay}s",
+                        )
+
+                        await asyncio.sleep(
+                            delay
+                        )
+
+                if (
+                    not candles
+                    and last_error is not None
+                ):
+                    raise last_error
+
+            current_start = (
+                current_end
+                + timedelta(minutes=1)
+            )
+
+        unique: dict[
+            int,
+            dict[str, float]
+        ] = {}
+
+        for candle in all_candles:
+            unique[
+                int(candle["time"])
+            ] = candle
+
+        result = sorted(
+            unique.values(),
+            key=lambda item: item["time"],
+        )
+
+        print(
+            "[SmartAPI long history]",
+            symbol,
+            "daily candles:",
+            len(result),
+        )
+
+        return result
 
     async def quote(
         self,
@@ -685,41 +1157,33 @@ class AngelOneMarketData:
 
             return Quote(
                 symbol=symbol,
-
                 last_price=price,
-
                 open=float(
                     data.get(
                         "open",
                         price,
                     )
                 ),
-
                 high=float(
                     data.get(
                         "high",
                         price,
                     )
                 ),
-
                 low=float(
                     data.get(
                         "low",
                         price,
                     )
                 ),
-
                 previous_close=float(
                     data.get(
                         "close",
                         price,
                     )
                 ),
-
-                updated_at=(
-                    datetime.now(
-                        IST
-                    )
+                updated_at=datetime.now(
+                    IST
                 ),
             )
 
@@ -747,7 +1211,6 @@ class AngelOneMarketData:
     ]:
 
         if interval == "15s":
-
             await self.quote(
                 symbol,
                 token,
@@ -760,94 +1223,11 @@ class AngelOneMarketData:
                 )
             )
 
-        if (
-            interval
-            not in INTERVAL_MAP
-        ):
-            raise ValueError(
-                "Unsupported interval"
-            )
-
-        def fetch() -> list[
-            dict[str, float]
-        ]:
-
-            now = datetime.now(
-                IST
-            )
-
-            payload = {
-                "exchange": "NSE",
-
-                "symboltoken": token,
-
-                "interval": (
-                    INTERVAL_MAP[
-                        interval
-                    ]
-                ),
-
-                "fromdate": (
-                    now
-                    - timedelta(
-                        days=5
-                    )
-                ).strftime(
-                    "%Y-%m-%d %H:%M"
-                ),
-
-                "todate": (
-                    now.strftime(
-                        "%Y-%m-%d %H:%M"
-                    )
-                ),
-            }
-
-            response = (
-                self.client
-                .getCandleData(
-                    payload
-                )
-            )
-
-            if self._is_invalid_token(
-                response
-            ):
-                print(
-                    "[SmartAPI] Candle token invalid "
-                    f"for {symbol}. Re-authenticating..."
-                )
-
-                self._login()
-
-                response = (
-                    self.client
-                    .getCandleData(
-                        payload
-                    )
-                )
-
-            if not response.get(
-                "status"
-            ):
-                raise RuntimeError(
-                    response.get(
-                        "message",
-                        (
-                            "Unable to "
-                            "fetch candles"
-                        ),
-                    )
-                )
-
-            return (
-                self._parse_candles(
-                    response
-                )
-            )
-
-        return await asyncio.to_thread(
-            fetch
+        return await self._get_cached_candles(
+            symbol=symbol,
+            interval=interval,
+            token=token,
+            days=5,
         )
 
     async def historical_candles(
@@ -860,99 +1240,11 @@ class AngelOneMarketData:
         dict[str, float]
     ]:
 
-        if (
-            interval
-            not in INTERVAL_MAP
-        ):
-            raise ValueError(
-                "Unsupported interval"
-            )
-
-        if days < 1:
-            raise ValueError(
-                "Days must be at least 1"
-            )
-
-        def fetch() -> list[
-            dict[str, float]
-        ]:
-
-            now = datetime.now(
-                IST
-            )
-
-            payload = {
-                "exchange": "NSE",
-
-                "symboltoken": token,
-
-                "interval": (
-                    INTERVAL_MAP[
-                        interval
-                    ]
-                ),
-
-                "fromdate": (
-                    now
-                    - timedelta(
-                        days=days
-                    )
-                ).strftime(
-                    "%Y-%m-%d %H:%M"
-                ),
-
-                "todate": (
-                    now.strftime(
-                        "%Y-%m-%d %H:%M"
-                    )
-                ),
-            }
-
-            response = (
-                self.client
-                .getCandleData(
-                    payload
-                )
-            )
-
-            if self._is_invalid_token(
-                response
-            ):
-                print(
-                    "[SmartAPI] Historical token invalid "
-                    f"for {symbol}. Re-authenticating..."
-                )
-
-                self._login()
-
-                response = (
-                    self.client
-                    .getCandleData(
-                        payload
-                    )
-                )
-
-            if not response.get(
-                "status"
-            ):
-                raise RuntimeError(
-                    response.get(
-                        "message",
-                        (
-                            "Unable to fetch "
-                            "historical candles"
-                        ),
-                    )
-                )
-
-            return (
-                self._parse_candles(
-                    response
-                )
-            )
-
-        return await asyncio.to_thread(
-            fetch
+        return await self._get_cached_candles(
+            symbol=symbol,
+            interval=interval,
+            token=token,
+            days=days,
         )
 
     @staticmethod
@@ -989,23 +1281,18 @@ class AngelOneMarketData:
                     "time": int(
                         timestamp.timestamp()
                     ),
-
                     "open": float(
                         row[1]
                     ),
-
                     "high": float(
                         row[2]
                     ),
-
                     "low": float(
                         row[3]
                     ),
-
                     "close": float(
                         row[4]
                     ),
-
                     "volume": float(
                         row[5]
                         or 0

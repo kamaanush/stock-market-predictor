@@ -33,13 +33,12 @@ type LiveMarketMessage = {
 
 type LiveCandleResponse = {
   symbol: string;
-
-  interval:
-    ChartTimeframe;
-
-  candles:
-    Candle[];
-};
+} & Partial<
+  Record<
+    ChartTimeframe,
+    Candle[]
+  >
+>;
 
 type InstrumentSearchResult = {
   symbol: string;
@@ -768,7 +767,7 @@ useEffect(() => {
       }
 
       const candles =
-        data.candles ?? [];
+      data[timeframe] ?? [];
 
       console.log(
         "[NEXUS candles]",
