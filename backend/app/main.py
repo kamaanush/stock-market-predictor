@@ -19,7 +19,11 @@ from fastapi import (
     status,
 )
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import delete, select
+from sqlalchemy import (
+    delete,
+    func,
+    select,
+)
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -817,7 +821,198 @@ async def me(request: Request) -> dict[str, bool]:
     return {
         "authenticated": request.session.get("owner") is True
     }
+@app.get(
+    "/api/instruments",
+    dependencies=[
+        Depends(
+            require_owner
+        )
+    ],
+)
+async def list_instruments(
+    page: int = 1,
+    page_size: int = 50,
+    q: str = "",
+    kind: str = "EQUITY",
+    session:
+        AsyncSession =
+        Depends(
+            get_session
+        ),
+) -> dict[str, Any]:
 
+    if page < 1:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Page must be "
+                "at least 1"
+            ),
+        )
+
+    if (
+        page_size < 1 or
+        page_size > 100
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Page size must "
+                "be between "
+                "1 and 100"
+            ),
+        )
+
+    normalized_kind = (
+        str(kind)
+        .strip()
+        .upper()
+    )
+
+    term = (
+        str(q)
+        .strip()
+        .upper()
+    )
+
+    filters = []
+
+    if (
+        normalized_kind
+        and
+        normalized_kind !=
+        "ALL"
+    ):
+        filters.append(
+            Instrument.kind
+            ==
+            normalized_kind
+        )
+
+    if term:
+        filters.append(
+            Instrument.symbol
+            .ilike(
+                f"%{term}%"
+            )
+            |
+            Instrument.name
+            .ilike(
+                f"%{term}%"
+            )
+        )
+
+    count_query = (
+        select(
+            func.count(
+                Instrument.id
+            )
+        )
+    )
+
+    if filters:
+        count_query = (
+            count_query
+            .where(
+                *filters
+            )
+        )
+
+    total = int(
+        (
+            await session
+            .execute(
+                count_query
+            )
+        )
+        .scalar_one()
+    )
+
+    offset = (
+        page - 1
+    ) * page_size
+
+    query = (
+        select(
+            Instrument
+        )
+        .order_by(
+            Instrument.symbol
+            .asc()
+        )
+        .offset(
+            offset
+        )
+        .limit(
+            page_size
+        )
+    )
+
+    if filters:
+        query = (
+            query.where(
+                *filters
+            )
+        )
+
+    result = (
+        await session
+        .execute(
+            query
+        )
+    )
+
+    instruments = list(
+        result.scalars()
+    )
+
+    pages = max(
+        1,
+        (
+            total
+            +
+            page_size
+            -
+            1
+        )
+        //
+        page_size,
+    )
+
+    return {
+        "items": [
+            {
+                "exchange":
+                    item.exchange,
+
+                "symbol":
+                    item.symbol,
+
+                "name":
+                    item.name,
+
+                "token":
+                    item.token,
+
+                "kind":
+                    item.kind,
+            }
+            for item
+            in instruments
+        ],
+
+        "page":
+            page,
+
+        "page_size":
+            page_size,
+
+        "total":
+            total,
+
+        "pages":
+            pages,
+    }
 
 @app.get(
     "/api/instruments/search",

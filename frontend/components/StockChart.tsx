@@ -49,7 +49,7 @@ function ema(
     (item) => {
       previous =
         (item.close - previous) *
-          multiplier +
+        multiplier +
         previous;
 
       return {
@@ -61,38 +61,121 @@ function ema(
   );
 }
 
+function getIstDate(
+  timestamp: number,
+) {
+  // Epoch values coming from the backend are UTC.
+  // Shift by +05:30 and format with UTC methods so
+  // the chart always displays NSE / IST time.
+  const IST_OFFSET_SECONDS =
+    5 * 60 * 60 +
+    30 * 60;
+
+  return new Date(
+    (
+      timestamp +
+      IST_OFFSET_SECONDS
+    ) * 1000
+  );
+}
+
+function getIstDateKey(
+  timestamp: number,
+) {
+  const date =
+    getIstDate(timestamp);
+
+  const year =
+    date.getUTCFullYear();
+
+  const month =
+    String(
+      date.getUTCMonth() + 1
+    ).padStart(
+      2,
+      "0"
+    );
+
+  const day =
+    String(
+      date.getUTCDate()
+    ).padStart(
+      2,
+      "0"
+    );
+
+  return `${year}-${month}-${day}`;
+}
+
 function formatIstTime(
   timestamp: number,
   interval: string,
+  tickMarkType?:
+    TickMarkType,
 ) {
   const date =
-    new Date(
-      timestamp * 1000
+    getIstDate(
+      timestamp
     );
 
-  if (
+  const intraday =
     interval === "15s" ||
     interval === "1m" ||
     interval === "5m" ||
-    interval === "15m"
-  ) {
+    interval === "15m";
+
+  if (intraday) {
+
+    /*
+     * When Lightweight Charts decides that
+     * this tick represents a new day/month/year,
+     * show the date rather than only the clock.
+     *
+     * This prevents:
+     *
+     * 14 Aug 15:30
+     * 18 Aug 09:15
+     *
+     * from visually looking like:
+     *
+     * 15:30 → 09:15
+     */
+
+    if (
+      tickMarkType ===
+      TickMarkType.DayOfMonth ||
+      tickMarkType ===
+      TickMarkType.Month ||
+      tickMarkType ===
+      TickMarkType.Year
+    ) {
+      return new Intl.DateTimeFormat(
+        "en-IN",
+        {
+          timeZone: "UTC",
+          day: "2-digit",
+          month: "short",
+        }
+      ).format(
+        date
+      );
+    }
+
     return new Intl.DateTimeFormat(
       "en-IN",
       {
-        timeZone:
-          "Asia/Kolkata",
-        hour:
-          "2-digit",
-        minute:
-          "2-digit",
+        timeZone: "UTC",
+        hour: "2-digit",
+        minute: "2-digit",
         second:
           interval === "15s"
             ? "2-digit"
             : undefined,
-        hour12:
-          false,
+        hour12: false,
       }
-    ).format(date);
+    ).format(
+      date
+    );
   }
 
   if (
@@ -101,14 +184,13 @@ function formatIstTime(
     return new Intl.DateTimeFormat(
       "en-IN",
       {
-        timeZone:
-          "Asia/Kolkata",
-        day:
-          "2-digit",
-        month:
-          "short",
+        timeZone: "UTC",
+        day: "2-digit",
+        month: "short",
       }
-    ).format(date);
+    ).format(
+      date
+    );
   }
 
   if (
@@ -117,14 +199,13 @@ function formatIstTime(
     return new Intl.DateTimeFormat(
       "en-IN",
       {
-        timeZone:
-          "Asia/Kolkata",
-        month:
-          "short",
-        year:
-          "2-digit",
+        timeZone: "UTC",
+        month: "short",
+        year: "2-digit",
       }
-    ).format(date);
+    ).format(
+      date
+    );
   }
 
   if (
@@ -133,12 +214,12 @@ function formatIstTime(
     return new Intl.DateTimeFormat(
       "en-IN",
       {
-        timeZone:
-          "Asia/Kolkata",
-        year:
-          "numeric",
+        timeZone: "UTC",
+        year: "numeric",
       }
-    ).format(date);
+    ).format(
+      date
+    );
   }
 
   return "";
@@ -149,8 +230,8 @@ function formatCrosshairTime(
   interval: string,
 ) {
   const date =
-    new Date(
-      timestamp * 1000
+    getIstDate(
+      timestamp
     );
 
   const intraday =
@@ -163,48 +244,45 @@ function formatCrosshairTime(
     return new Intl.DateTimeFormat(
       "en-IN",
       {
-        timeZone:
-          "Asia/Kolkata",
-        day:
-          "2-digit",
-        month:
-          "short",
-        year:
-          "numeric",
-        hour:
-          "2-digit",
-        minute:
-          "2-digit",
+        timeZone: "UTC",
+
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+
+        hour: "2-digit",
+        minute: "2-digit",
+
         second:
           interval === "15s"
             ? "2-digit"
             : undefined,
-        hour12:
-          false,
+
+        hour12: false,
       }
-    ).format(date);
+    ).format(
+      date
+    );
   }
 
   return new Intl.DateTimeFormat(
     "en-IN",
     {
-      timeZone:
-        "Asia/Kolkata",
-      day:
-        "2-digit",
-      month:
-        "short",
-      year:
-        "numeric",
+      timeZone: "UTC",
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
     }
-  ).format(date);
+  ).format(
+    date
+  );
 }
 
 function getBarSpacing(
   interval: string,
 ) {
   switch (
-    interval
+  interval
   ) {
     case "15s":
       return 9;
@@ -236,19 +314,19 @@ function getVisibleCount(
   interval: string,
 ) {
   switch (
-    interval
+  interval
   ) {
     case "15s":
-      return 80;
+      return 300;
 
     case "1m":
-      return 100;
+      return 375;
 
     case "5m":
-      return 100;
+      return 75;
 
     case "15m":
-      return 100;
+      return 25;
 
     case "1D":
       return 120;
@@ -270,12 +348,12 @@ function calculateOhlc(
   const changePercent =
     candle.open !== 0
       ? (
-          (
-            candle.close
-            - candle.open
-          )
-          / candle.open
-        ) * 100
+        (
+          candle.close
+          - candle.open
+        )
+        / candle.open
+      ) * 100
       : 0;
 
   return {
@@ -296,9 +374,11 @@ function calculateOhlc(
 export default function StockChart({
   data,
   interval = "5m",
+  height = 430,
 }: {
   data: Candle[];
   interval?: string;
+  height?: number;
 }) {
   const target =
     useRef<HTMLDivElement>(
@@ -319,10 +399,10 @@ export default function StockChart({
   ] = useState<OhlcState>(
     data.length
       ? calculateOhlc(
-          data[
-            data.length - 1
-          ]
-        )
+        data[
+        data.length - 1
+        ]
+      )
       : null
   );
 
@@ -333,7 +413,7 @@ export default function StockChart({
       setOhlc(
         calculateOhlc(
           data[
-            data.length - 1
+          data.length - 1
           ]
         )
       );
@@ -432,16 +512,15 @@ export default function StockChart({
 
             tickMarkFormatter: (
               time: number,
-              _tickMarkType:
-                TickMarkType,
+              tickMarkType: TickMarkType,
             ) => {
               if (
-                typeof time ===
-                "number"
+                typeof time === "number"
               ) {
                 return formatIstTime(
                   time,
-                  interval
+                  interval,
+                  tickMarkType
                 );
               }
 
@@ -571,15 +650,21 @@ export default function StockChart({
           lastValueVisible:
             true,
         });
-
+    console.log(
+      "[CHART RANGE]",
+      interval,
+      data.length,
+      data[0],
+      data[
+      data.length - 1
+      ]
+    );
     const normalizedData =
       data.map(
         (item) => ({
           ...item,
-
           time:
-            item.time as
-              UTCTimestamp,
+            item.time as UTCTimestamp,
         })
       );
 
@@ -598,7 +683,7 @@ export default function StockChart({
 
           color:
             item.close >=
-            item.open
+              item.open
               ? "rgba(0,200,83,0.40)"
               : "rgba(255,23,68,0.40)",
         })
@@ -606,54 +691,102 @@ export default function StockChart({
     );
 
     movingAverage.setData(
-      ema(
-        data
-      )
+      ema(data)
     );
 
     const timeScale =
       chart.timeScale();
 
-    const visibleCount =
-      getVisibleCount(
-        interval
-      );
+    const isIntraday =
+      interval === "15s" ||
+      interval === "1m" ||
+      interval === "5m" ||
+      interval === "15m";
 
     if (
-      data.length >
-      visibleCount
+      isIntraday &&
+      data.length > 0
     ) {
-      timeScale
-        .setVisibleLogicalRange({
-          from:
-            data.length
-            - visibleCount,
 
-          to:
-            data.length
-            + 3,
-        });
+      const latestCandle =
+        data[
+        data.length - 1
+        ];
+
+      const latestDate =
+        getIstDateKey(
+          latestCandle.time
+        );
+
+      const sessionStartIndex =
+        data.findIndex(
+          (item) =>
+            getIstDateKey(
+              item.time
+            ) === latestDate
+        );
+
+      if (
+        sessionStartIndex >= 0
+      ) {
+        timeScale
+          .setVisibleLogicalRange({
+            from:
+              sessionStartIndex
+              - 1,
+
+            to:
+              data.length
+              + 3,
+          });
+      } else {
+        timeScale
+          .fitContent();
+      }
+
     } else {
-      timeScale
-        .fitContent();
+
+      const visibleCount =
+        getVisibleCount(
+          interval
+        );
+
+      if (
+        data.length >
+        visibleCount
+      ) {
+        timeScale
+          .setVisibleLogicalRange({
+            from:
+              data.length
+              - visibleCount,
+
+            to:
+              data.length
+              + 3,
+          });
+      } else {
+        timeScale
+          .fitContent();
+      }
     }
 
     const handleVisibleRangeChange = (
       range:
         | {
-            from: number;
-            to: number;
-          }
+          from: number;
+          to: number;
+        }
         | null,
     ) => {
       if (range) {
         visibleRangeRef
           .current = {
-            from:
-              range.from,
-            to:
-              range.to,
-          };
+          from:
+            range.from,
+          to:
+            range.to,
+        };
       }
     };
 
@@ -674,7 +807,7 @@ export default function StockChart({
               setOhlc(
                 calculateOhlc(
                   data[
-                    data.length - 1
+                  data.length - 1
                   ]
                 )
               );
@@ -701,19 +834,19 @@ export default function StockChart({
           const candle =
             seriesData as {
               time:
-                UTCTimestamp;
+              UTCTimestamp;
 
               open:
-                number;
+              number;
 
               high:
-                number;
+              number;
 
               low:
-                number;
+              number;
 
               close:
-                number;
+              number;
             };
 
           const open =
@@ -729,12 +862,12 @@ export default function StockChart({
           const changePercent =
             open !== 0
               ? (
-                  (
-                    close - open
-                  )
-                  / open
+                (
+                  close - open
                 )
-                * 100
+                / open
+              )
+              * 100
               : 0;
 
           setOhlc({
@@ -853,7 +986,7 @@ export default function StockChart({
               style={{
                 color:
                   ohlc.changePercent >=
-                  0
+                    0
                     ? "#00c853"
                     : "#ff1744",
 
@@ -862,7 +995,7 @@ export default function StockChart({
               }}
             >
               {ohlc.changePercent >=
-              0
+                0
                 ? "+"
                 : ""}
               {ohlc.changePercent.toFixed(
@@ -889,7 +1022,7 @@ export default function StockChart({
         }
 
         className=
-          "w-full"
+        "w-full"
 
         aria-label={
           `Candlestick chart for ${interval} candles with EMA 20 and volume`

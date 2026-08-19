@@ -10,8 +10,11 @@ import {
 import StockChart, {
   Candle,
 } from "../../components/StockChart";
+import StockLoader from "../../components/StockLoader";
 import OverviewPanel from "../../components/dashboard/OverviewPanel";
 import ScannerPanel from "../../components/dashboard/ScannerPanel";
+import MarketRadarPanel from "../../components/dashboard/MarketRadarPanel";
+
 type LiveStock = {
   symbol: string;
   token?: string;
@@ -49,6 +52,7 @@ type InstrumentSearchResult = {
 
 type DashboardView =
   | "overview"
+  | "radar"
   | "scanner"
   | "watchlist"
   | "portfolio"
@@ -57,7 +61,7 @@ type DashboardView =
   | "analytics"
   | "settings";
 
-  type ChartTimeframe =
+type ChartTimeframe =
   | "15s"
   | "1m"
   | "5m"
@@ -192,16 +196,48 @@ const WS_URL =
 
 
 const navigation = [
-  ["⌂", "OVERVIEW", "Market Dashboard"],
-  ["◈", "AI SCANNER", "Opportunities"],
-  ["♡", "WATCHLIST", "Live Markets"],
-  ["▣", "PORTFOLIO", "Holdings & P&L"],
-  ["♢", "ALERTS", "Smart Notifications"],
-  ["▧", "BACKTEST", "Strategy Lab"],
-  ["⌁", "ANALYTICS", "Market Intelligence"],
-  ["⚙", "SETTINGS", "Preferences"],
-];
+  [
+    "⌂",
+    "OVERVIEW",
+    "Market Dashboard",
+  ],
 
+  [
+    "⌁",
+    "MARKET RADAR",
+    "Market Opportunities",
+  ],
+
+  [
+    "◈",
+    "AI SCANNER",
+    "Signal Analysis",
+  ],
+
+  [
+    "♡",
+    "WATCHLIST",
+    "Live Markets",
+  ],
+
+  [
+    "▣",
+    "PORTFOLIO",
+    "Holdings & P&L",
+  ],
+
+  [
+    "▧",
+    "BACKTEST",
+    "Strategy Lab",
+  ],
+
+  [
+    "⚙",
+    "SETTINGS",
+    "Preferences",
+  ],
+];
 
 export default function Dashboard() {
 
@@ -220,10 +256,10 @@ export default function Dashboard() {
     setSelected,
   ] = useState("");
 
-   const [
-     clock,
-     setClock,
-     ] = useState<Date | null>(null);
+  const [
+    clock,
+    setClock,
+  ] = useState<Date | null>(null);
 
   const [
     authenticated,
@@ -252,31 +288,31 @@ export default function Dashboard() {
     setWsVersion,
   ] = useState(0);
 
-const [
-  timeframe,
-  setTimeframe,
-] = useState<ChartTimeframe>(
-  "15m"
-);
+  const [
+    timeframe,
+    setTimeframe,
+  ] = useState<ChartTimeframe>(
+    "15m"
+  );
 
-const scannerTimeframe:
-  "1m" |
-  "5m" |
-  "15m" =
-  timeframe === "1m"
-    ? "1m"
-    : timeframe === "5m"
-      ? "5m"
-      : timeframe === "15m"
-        ? "15m"
-        : timeframe === "15s"
-          ? "1m"
-          : "15m";
+  const scannerTimeframe:
+    "1m" |
+    "5m" |
+    "15m" =
+    timeframe === "1m"
+      ? "1m"
+      : timeframe === "5m"
+        ? "5m"
+        : timeframe === "15m"
+          ? "15m"
+          : timeframe === "15s"
+            ? "1m"
+            : "15m";
 
-const [
-  preferencesLoaded,
-  setPreferencesLoaded,
-] = useState(false);
+  const [
+    preferencesLoaded,
+    setPreferencesLoaded,
+  ] = useState(false);
 
   const [
     chartData,
@@ -286,6 +322,11 @@ const [
   const [
     chartLoading,
     setChartLoading,
+  ] = useState(false);
+
+  const [
+    fullScreenChart,
+    setFullScreenChart,
   ] = useState(false);
 
   const [
@@ -375,47 +416,95 @@ const [
   // CLOCK
   // ==================================================
 
-useEffect(() => {
-  setClock(new Date());
+  useEffect(() => {
+    setClock(new Date());
 
-  const timer =
-    window.setInterval(
-      () => {
-        setClock(
-          new Date()
+    const timer =
+      window.setInterval(
+        () => {
+          setClock(
+            new Date()
+          );
+        },
+        1000
+      );
+
+    return () => {
+      window.clearInterval(
+        timer
+      );
+    };
+  }, []);
+
+  useEffect(() => {
+    const savedTimeframe =
+      window.localStorage.getItem(
+        "nexus_default_timeframe"
+      );
+
+    console.log(
+      "[NEXUS] Saved timeframe:",
+      savedTimeframe
+    );
+
+    if (
+      savedTimeframe === "1m" ||
+      savedTimeframe === "5m" ||
+      savedTimeframe === "15m"
+    ) {
+      setTimeframe(savedTimeframe);
+    }
+
+    setPreferencesLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    if (
+      !fullScreenChart
+    ) {
+      return;
+    }
+
+    const previousOverflow =
+      document.body.style
+        .overflow;
+
+    document.body.style
+      .overflow =
+      "hidden";
+
+    function handleKeyDown(
+      event: KeyboardEvent
+    ) {
+      if (
+        event.key ===
+        "Escape"
+      ) {
+        setFullScreenChart(
+          false
         );
-      },
-      1000
+      }
+    }
+
+    window.addEventListener(
+      "keydown",
+      handleKeyDown
     );
 
-  return () => {
-    window.clearInterval(
-      timer
-    );
-  };
-}, []);
+    return () => {
+      document.body.style
+        .overflow =
+        previousOverflow;
 
-useEffect(() => {
-  const savedTimeframe =
-    window.localStorage.getItem(
-      "nexus_default_timeframe"
-    );
+      window.removeEventListener(
+        "keydown",
+        handleKeyDown
+      );
+    };
+  }, [
+    fullScreenChart,
+  ]);
 
-  console.log(
-    "[NEXUS] Saved timeframe:",
-    savedTimeframe
-  );
-
-  if (
-    savedTimeframe === "1m" ||
-    savedTimeframe === "5m" ||
-    savedTimeframe === "15m"
-  ) {
-    setTimeframe(savedTimeframe);
-  }
-
-  setPreferencesLoaded(true);
-}, []);
   // ==================================================
   // LOGIN
   // ==================================================
@@ -465,7 +554,7 @@ useEffect(() => {
 
         throw new Error(
           body.detail ||
-            "Login failed"
+          "Login failed"
         );
       }
 
@@ -563,7 +652,7 @@ useEffect(() => {
 
             if (
               message.type ===
-                "market_update"
+              "market_update"
               &&
               Array.isArray(
                 message.stocks
@@ -576,8 +665,8 @@ useEffect(() => {
 
               setLastMarketUpdate(
                 message.time ||
-                  new Date()
-                    .toISOString()
+                new Date()
+                  .toISOString()
               );
 
 
@@ -593,7 +682,7 @@ useEffect(() => {
                     message
                       .stocks
                       .length >
-                      0
+                    0
                   ) {
 
                     return (
@@ -698,131 +787,129 @@ useEffect(() => {
   }, [wsVersion]);
 
 
-// ==================================================
-// LIVE CANDLES
-// ==================================================
+  // ==================================================
+  // LIVE CANDLES
+  // ==================================================
 
-useEffect(() => {
-  console.log(
-    "[CANDLE EFFECT]",
-    {
-      selected,
-      authenticated,
-      timeframe,
-    }
-  );
-
-  if (
-    !selected ||
-    authenticated !== true
-  ) {
-    setChartData([]);
-    return;
-  }
-
-  let active = true;
-
-  async function loadCandles() {
-    try {
-      setChartLoading(true);
-
-      const response =
-        await fetch(
-          `${API_BASE}/api/live/candles/${encodeURIComponent(
-            selected
-          )}?interval=${encodeURIComponent(
-            timeframe
-          )}`,
-          {
-            credentials: "include",
-            cache: "no-store",
-          }
-        );
-
-      if (response.status === 401) {
-        if (active) {
-          setAuthenticated(false);
-          setChartData([]);
-        }
-
-        return;
-      }
-
-      if (!response.ok) {
-        throw new Error(
-          `Candle request failed: ${
-            response.status
-          } ${
-            await response.text()
-          }`
-        );
-      }
-
-      const data:
-        LiveCandleResponse =
-        await response.json();
-
-      if (!active) {
-        return;
-      }
-
-      const candles =
-      data[timeframe] ?? [];
-
-      console.log(
-        "[NEXUS candles]",
+  useEffect(() => {
+    console.log(
+      "[CANDLE EFFECT]",
+      {
         selected,
+        authenticated,
         timeframe,
-        candles.length
-      );
-
-      setChartData(candles);
-    } catch (error) {
-      console.error(
-        "Unable to load candles:",
-        error
-      );
-
-      if (active) {
-        setChartData([]);
       }
-    } finally {
-      if (active) {
-        setChartLoading(false);
-      }
-    }
-  }
-
-  void loadCandles();
-
-  const refreshMs =
-    timeframe === "15s"
-      ? 5000
-      : timeframe === "1m"
-        ? 60000
-        : timeframe === "5m"
-          ? 120000
-          : timeframe === "15m"
-            ? 180000
-            : 300000;
-
-  const timer =
-    window.setInterval(
-      () => {
-        void loadCandles();
-      },
-      refreshMs
     );
 
-  return () => {
-    active = false;
-    window.clearInterval(timer);
-  };
-}, [
-  authenticated,
-  selected,
-  timeframe,
-]);
+    if (
+      !selected ||
+      authenticated !== true
+    ) {
+      setChartData([]);
+      return;
+    }
+
+    let active = true;
+
+    async function loadCandles() {
+      try {
+        setChartLoading(true);
+
+        const response =
+          await fetch(
+            `${API_BASE}/api/live/candles/${encodeURIComponent(
+              selected
+            )}?interval=${encodeURIComponent(
+              timeframe
+            )}`,
+            {
+              credentials: "include",
+              cache: "no-store",
+            }
+          );
+
+        if (response.status === 401) {
+          if (active) {
+            setAuthenticated(false);
+            setChartData([]);
+          }
+
+          return;
+        }
+
+        if (!response.ok) {
+          throw new Error(
+            `Candle request failed: ${response.status
+            } ${await response.text()
+            }`
+          );
+        }
+
+        const data:
+          LiveCandleResponse =
+          await response.json();
+
+        if (!active) {
+          return;
+        }
+
+        const candles =
+          data[timeframe] ?? [];
+
+        console.log(
+          "[NEXUS candles]",
+          selected,
+          timeframe,
+          candles.length
+        );
+
+        setChartData(candles);
+      } catch (error) {
+        console.error(
+          "Unable to load candles:",
+          error
+        );
+
+        if (active) {
+          setChartData([]);
+        }
+      } finally {
+        if (active) {
+          setChartLoading(false);
+        }
+      }
+    }
+
+    void loadCandles();
+
+    const refreshMs =
+      timeframe === "15s"
+        ? 5000
+        : timeframe === "1m"
+          ? 60000
+          : timeframe === "5m"
+            ? 120000
+            : timeframe === "15m"
+              ? 180000
+              : 300000;
+
+    const timer =
+      window.setInterval(
+        () => {
+          void loadCandles();
+        },
+        refreshMs
+      );
+
+    return () => {
+      active = false;
+      window.clearInterval(timer);
+    };
+  }, [
+    authenticated,
+    selected,
+    timeframe,
+  ]);
 
 
   // ==================================================
@@ -866,13 +953,13 @@ useEffect(() => {
 
   useEffect(() => {
 
-     if (
-     !preferencesLoaded ||
-     !scannerSymbolsKey ||
-     authenticated !== true
-     ) {
-     return;
-      }
+    if (
+      !preferencesLoaded ||
+      !scannerSymbolsKey ||
+      authenticated !== true
+    ) {
+      return;
+    }
 
 
     let active = true;
@@ -891,85 +978,85 @@ useEffect(() => {
           .filter(Boolean);
 
 
-const results:
-  PromiseSettledResult<ScannerResult>[] =
-  [];
+      const results:
+        PromiseSettledResult<ScannerResult>[] =
+        [];
 
-for (
-  const symbol of symbols
-) {
-  try {
-    const response =
-      await fetch(
-        `${API_BASE}/api/v2/scanner/${symbol}?interval=${scannerTimeframe}`,
-        {
-          credentials:
-            "include",
-        }
-      );
+      for (
+        const symbol of symbols
+      ) {
+        try {
+          const response =
+            await fetch(
+              `${API_BASE}/api/v2/scanner/${symbol}?interval=${scannerTimeframe}`,
+              {
+                credentials:
+                  "include",
+              }
+            );
 
-    if (
-      response.status ===
-      401
-    ) {
-      throw new Error(
-        "Login required"
-      );
-    }
+          if (
+            response.status ===
+            401
+          ) {
+            throw new Error(
+              "Login required"
+            );
+          }
 
-    if (
-      !response.ok
-    ) {
-      const body =
-        await response
-          .json()
-          .catch(
-            () => ({})
+          if (
+            !response.ok
+          ) {
+            const body =
+              await response
+                .json()
+                .catch(
+                  () => ({})
+                );
+
+            throw new Error(
+              body.detail ||
+              `${symbol}: scanner failed`
+            );
+          }
+
+          const data:
+            ScannerResult =
+            await response.json();
+
+          results.push({
+            status:
+              "fulfilled",
+            value:
+              data,
+          });
+        } catch (
+        error
+        ) {
+          console.error(
+            `[NEXUS scanner] ${symbol}`,
+            error
           );
 
-      throw new Error(
-        body.detail ||
-          `${symbol}: scanner failed`
-      );
-    }
+          results.push({
+            status:
+              "rejected",
+            reason:
+              error,
+          });
+        }
 
-    const data:
-      ScannerResult =
-      await response.json();
-
-    results.push({
-      status:
-        "fulfilled",
-      value:
-        data,
-    });
-  } catch (
-    error
-  ) {
-    console.error(
-      `[NEXUS scanner] ${symbol}`,
-      error
-    );
-
-    results.push({
-      status:
-        "rejected",
-      reason:
-        error,
-    });
-  }
-
-  await new Promise<void>(
-    (
-      resolve
-    ) => {
-      window.setTimeout(
-        resolve,
-        2500
-      );
-    }
-  );
-}
+        await new Promise<void>(
+          (
+            resolve
+          ) => {
+            window.setTimeout(
+              resolve,
+              2500
+            );
+          }
+        );
+      }
 
 
       if (!active) {
@@ -1024,16 +1111,16 @@ for (
     //   );
 
 
-return () => {
-  active = false;
-};
+    return () => {
+      active = false;
+    };
 
-}, [
-  authenticated,
-  scannerTimeframe,
-  scannerSymbolsKey,
-  preferencesLoaded,
-]);
+  }, [
+    authenticated,
+    scannerTimeframe,
+    scannerSymbolsKey,
+    preferencesLoaded,
+  ]);
 
 
   // ==================================================
@@ -1152,7 +1239,7 @@ return () => {
 
         const latest =
           events[
-            events.length - 1
+          events.length - 1
           ];
 
         setAlertsMessage(
@@ -1162,12 +1249,12 @@ return () => {
         if (
           "Notification" in window &&
           Notification.permission ===
-            "granted" &&
+          "granted" &&
           (
             latest.delivery ===
-              "BROWSER" ||
+            "BROWSER" ||
             latest.delivery ===
-              "BOTH"
+            "BOTH"
           )
         ) {
           new Notification(
@@ -1187,11 +1274,11 @@ return () => {
 
     void poll();
 
-const timer =
-  window.setInterval(
-    poll,
-    5000
-  );
+    const timer =
+      window.setInterval(
+        poll,
+        5000
+      );
     return () => {
       window.clearInterval(
         timer
@@ -1229,15 +1316,15 @@ const timer =
           body: JSON.stringify({
             symbol: String(
               form.get("symbol") ||
-                ""
+              ""
             ).toUpperCase(),
             name: String(
               form.get("name") ||
-                ""
+              ""
             ),
             token: String(
               form.get("token") ||
-                ""
+              ""
             ),
             quantity: Number(
               form.get("quantity")
@@ -1261,7 +1348,7 @@ const timer =
 
         throw new Error(
           body.detail ||
-            "Could not save holding"
+          "Could not save holding"
         );
       }
 
@@ -1385,7 +1472,7 @@ const timer =
 
         throw new Error(
           body.detail ||
-            "Could not import CSV"
+          "Could not import CSV"
         );
       }
 
@@ -1438,11 +1525,11 @@ const timer =
           body: JSON.stringify({
             symbol: String(
               form.get("symbol") ||
-                ""
+              ""
             ).toUpperCase(),
             name: String(
               form.get("name") ||
-                ""
+              ""
             ),
             condition:
               form.get(
@@ -1471,7 +1558,7 @@ const timer =
 
         throw new Error(
           body.detail ||
-            "Could not create alert"
+          "Could not create alert"
         );
       }
 
@@ -1700,7 +1787,7 @@ const timer =
 
         throw new Error(
           body.detail ||
-            "Could not add stock"
+          "Could not add stock"
         );
       }
 
@@ -1728,22 +1815,31 @@ const timer =
   ) {
     const map:
       Record<string, DashboardView> = {
-        OVERVIEW: "overview",
-        "AI SCANNER": "scanner",
-        WATCHLIST: "watchlist",
-        PORTFOLIO: "portfolio",
-        ALERTS: "alerts",
-        BACKTEST: "backtest",
-        ANALYTICS: "analytics",
-        SETTINGS: "settings",
-      };
+      OVERVIEW: "overview",
+      "MARKET RADAR": "radar",
+      "AI SCANNER": "scanner",
+      WATCHLIST: "watchlist",
+      PORTFOLIO: "portfolio",
+      BACKTEST: "backtest",
+      SETTINGS: "settings",
+    };
 
     setActiveView(
       map[title] || "overview"
     );
   }
 
+  function openFullScreenChart(
+    symbol: string
+  ) {
+    setSelected(
+      symbol
+    );
 
+    setFullScreenChart(
+      true
+    );
+  }
 
   // ==================================================
   // SELECTED STOCK
@@ -1767,15 +1863,547 @@ const timer =
   const selectedScanner =
     selected
       ? scanners[
-          selected
-        ]
+      selected
+      ]
       : undefined;
 
 
   // ==================================================
   // LOGIN SCREEN
   // ==================================================
+  {
+    fullScreenChart && (
 
+      <div
+        style={{
+          position:
+            "fixed",
+
+          inset:
+            0,
+
+          zIndex:
+            99999,
+
+          display:
+            "flex",
+
+          flexDirection:
+            "column",
+
+          background:
+            "#040a06",
+
+          overflow:
+            "hidden",
+        }}
+      >
+
+        {/* ==========================================
+        FULLSCREEN HEADER
+    ========================================== */}
+
+        <div
+          style={{
+            display:
+              "flex",
+
+            alignItems:
+              "center",
+
+            justifyContent:
+              "space-between",
+
+            gap:
+              "18px",
+
+            padding:
+              "14px 20px",
+
+            borderBottom:
+              "1px solid #163425",
+
+            background:
+              "#07100b",
+          }}
+        >
+
+          {/* LEFT */}
+
+          <div
+            style={{
+              display:
+                "flex",
+
+              alignItems:
+                "center",
+
+              gap:
+                "18px",
+            }}
+          >
+
+            <button
+              type="button"
+              onClick={
+                () =>
+                  setFullScreenChart(
+                    false
+                  )
+              }
+              style={{
+                border:
+                  "1px solid #24533c",
+
+                borderRadius:
+                  "7px",
+
+                background:
+                  "#0a1710",
+
+                color:
+                  "#9ee6bc",
+
+                padding:
+                  "8px 13px",
+
+                cursor:
+                  "pointer",
+
+                fontSize:
+                  "11px",
+
+                fontWeight:
+                  700,
+              }}
+            >
+              ← BACK
+            </button>
+
+
+            <div>
+
+              <div
+                style={{
+                  color:
+                    "#5f8370",
+
+                  fontSize:
+                    "9px",
+
+                  fontWeight:
+                    700,
+
+                  letterSpacing:
+                    ".15em",
+                }}
+              >
+                NSE • LIVE CHART
+              </div>
+
+              <div
+                style={{
+                  display:
+                    "flex",
+
+                  alignItems:
+                    "baseline",
+
+                  gap:
+                    "10px",
+
+                  marginTop:
+                    "3px",
+                }}
+              >
+
+                <strong
+                  style={{
+                    color:
+                      "#ffffff",
+
+                    fontSize:
+                      "22px",
+                  }}
+                >
+                  {
+                    selected ||
+                    "SELECT STOCK"
+                  }
+                </strong>
+
+                <span
+                  style={{
+                    color:
+                      "#65e39a",
+
+                    fontSize:
+                      "18px",
+
+                    fontWeight:
+                      700,
+                  }}
+                >
+                  {
+                    selectedStock
+                      ? `₹${selectedStock.ltp.toFixed(
+                        2
+                      )}`
+                      : "—"
+                  }
+                </span>
+
+              </div>
+
+            </div>
+
+          </div>
+
+
+          {/* RIGHT */}
+
+          <div
+            style={{
+              display:
+                "flex",
+
+              alignItems:
+                "center",
+
+              gap:
+                "8px",
+
+              flexWrap:
+                "wrap",
+
+              justifyContent:
+                "flex-end",
+            }}
+          >
+
+            {(
+              [
+                "15s",
+                "1m",
+                "5m",
+                "15m",
+                "1D",
+                "1W",
+                "1M",
+              ] as ChartTimeframe[]
+            ).map(
+              (
+                value
+              ) => (
+
+                <button
+                  key={
+                    value
+                  }
+                  type="button"
+                  onClick={
+                    () =>
+                      setTimeframe(
+                        value
+                      )
+                  }
+                  style={{
+                    border:
+                      timeframe ===
+                        value
+                        ? "1px solid #37d67a"
+                        : "1px solid #1a3c2a",
+
+                    borderRadius:
+                      "6px",
+
+                    background:
+                      timeframe ===
+                        value
+                        ? "rgba(55,214,122,.12)"
+                        : "#08120c",
+
+                    color:
+                      timeframe ===
+                        value
+                        ? "#7df0aa"
+                        : "#728879",
+
+                    padding:
+                      "7px 11px",
+
+                    cursor:
+                      "pointer",
+
+                    fontSize:
+                      "10px",
+
+                    fontWeight:
+                      700,
+                  }}
+                >
+                  {
+                    value
+                  }
+                </button>
+
+              )
+            )}
+
+          </div>
+
+        </div>
+
+
+        {/* ==========================================
+        SIGNAL STRIP
+    ========================================== */}
+
+        {selectedScanner && (
+
+          <div
+            style={{
+              display:
+                "flex",
+
+              alignItems:
+                "center",
+
+              gap:
+                "16px",
+
+              padding:
+                "8px 20px",
+
+              borderBottom:
+                "1px solid #10281b",
+
+              background:
+                "#050d08",
+
+              fontSize:
+                "10px",
+
+              color:
+                "#809487",
+            }}
+          >
+
+            <SignalBadge
+              signal={
+                selectedScanner
+                  .signal
+              }
+            />
+
+            <span>
+              TREND{" "}
+              <strong>
+                {
+                  selectedScanner
+                    .trend
+                }
+              </strong>
+            </span>
+
+            <span>
+              CONFIDENCE{" "}
+              <strong>
+                {
+                  selectedScanner
+                    .analysis
+                    .confidence
+                }
+                %
+              </strong>
+            </span>
+
+            <span>
+              GRADE{" "}
+              <strong>
+                {
+                  selectedScanner
+                    .grade
+                }
+              </strong>
+            </span>
+
+            <span>
+              {
+                selectedScanner
+                  .execution
+                  .status
+              }
+            </span>
+
+          </div>
+
+        )}
+
+
+        {/* ==========================================
+        CHART
+    ========================================== */}
+
+        <div
+          style={{
+            flex:
+              1,
+
+            minHeight:
+              0,
+
+            padding:
+              "10px 18px 0",
+
+            overflow:
+              "hidden",
+          }}
+        >
+
+          {chartLoading ? (
+
+            <StockLoader />
+
+          ) : chartData.length >
+            0 ? (
+
+            <StockChart
+              data={
+                chartData
+              }
+              interval={
+                timeframe
+              }
+              height={
+                680
+              }
+            />
+
+          ) : (
+
+            <div
+              style={{
+                height:
+                  "100%",
+
+                display:
+                  "flex",
+
+                alignItems:
+                  "center",
+
+                justifyContent:
+                  "center",
+
+                color:
+                  "#63766a",
+
+                fontSize:
+                  "12px",
+              }}
+            >
+              No {timeframe} candles
+              available for{" "}
+              {selected}
+            </div>
+
+          )}
+
+        </div>
+
+
+        {/* ==========================================
+        FOOTER
+    ========================================== */}
+
+        <div
+          style={{
+            display:
+              "flex",
+
+            alignItems:
+              "center",
+
+            justifyContent:
+              "space-between",
+
+            gap:
+              "20px",
+
+            padding:
+              "9px 20px",
+
+            borderTop:
+              "1px solid #163425",
+
+            background:
+              "#07100b",
+
+            color:
+              "#667c6e",
+
+            fontSize:
+              "9px",
+
+            fontWeight:
+              700,
+
+            letterSpacing:
+              ".08em",
+          }}
+        >
+
+          <span>
+            TIMEFRAME{" "}
+            <strong
+              style={{
+                color:
+                  "#a5e8bd",
+              }}
+            >
+              {
+                timeframe
+              }
+            </strong>
+          </span>
+
+          <span>
+            CANDLES{" "}
+            <strong
+              style={{
+                color:
+                  "#a5e8bd",
+              }}
+            >
+              {
+                chartData.length
+              }
+            </strong>
+          </span>
+
+          <span>
+            EMA{" "}
+            <strong
+              style={{
+                color:
+                  "#a5e8bd",
+              }}
+            >
+              EMA 20
+            </strong>
+          </span>
+
+          <span>
+            ESC TO CLOSE
+          </span>
+
+        </div>
+
+      </div>
+
+    )
+  }
   if (
     authenticated ===
     false
@@ -1902,6 +2530,305 @@ const timer =
   return (
     <main className="terminal">
 
+
+    {/* ==========================================
+        FULL SCREEN STOCK CHART
+    ========================================== */}
+
+    {fullScreenChart && (
+
+      <div
+        style={{
+          position: "fixed",
+          inset: 0,
+          zIndex: 99999,
+          display: "flex",
+          flexDirection: "column",
+          background: "#040a06",
+          overflow: "hidden",
+        }}
+      >
+
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: "18px",
+            padding: "14px 20px",
+            borderBottom: "1px solid #163425",
+            background: "#07100b",
+          }}
+        >
+
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "18px",
+            }}
+          >
+
+            <button
+              type="button"
+              onClick={() =>
+                setFullScreenChart(false)
+              }
+              style={{
+                border: "1px solid #24533c",
+                borderRadius: "7px",
+                background: "#0a1710",
+                color: "#9ee6bc",
+                padding: "8px 13px",
+                cursor: "pointer",
+                fontSize: "11px",
+                fontWeight: 700,
+              }}
+            >
+              ← BACK
+            </button>
+
+            <div>
+
+              <div
+                style={{
+                  color: "#5f8370",
+                  fontSize: "9px",
+                  fontWeight: 700,
+                  letterSpacing: ".15em",
+                }}
+              >
+                NSE • LIVE CHART
+              </div>
+
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "baseline",
+                  gap: "10px",
+                  marginTop: "3px",
+                }}
+              >
+
+                <strong
+                  style={{
+                    color: "#ffffff",
+                    fontSize: "22px",
+                  }}
+                >
+                  {selected || "SELECT STOCK"}
+                </strong>
+
+                <span
+                  style={{
+                    color: "#65e39a",
+                    fontSize: "18px",
+                    fontWeight: 700,
+                  }}
+                >
+                  {selectedStock
+                    ? `₹${selectedStock.ltp.toFixed(2)}`
+                    : "—"}
+                </span>
+
+              </div>
+
+            </div>
+
+          </div>
+
+
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+              flexWrap: "wrap",
+            }}
+          >
+
+            {(
+              [
+                "15s",
+                "1m",
+                "5m",
+                "15m",
+                "1D",
+                "1W",
+                "1M",
+              ] as ChartTimeframe[]
+            ).map((value) => (
+
+              <button
+                key={value}
+                type="button"
+                onClick={() =>
+                  setTimeframe(value)
+                }
+                style={{
+                  border:
+                    timeframe === value
+                      ? "1px solid #37d67a"
+                      : "1px solid #1a3c2a",
+
+                  borderRadius: "6px",
+
+                  background:
+                    timeframe === value
+                      ? "rgba(55,214,122,.12)"
+                      : "#08120c",
+
+                  color:
+                    timeframe === value
+                      ? "#7df0aa"
+                      : "#728879",
+
+                  padding: "7px 11px",
+                  cursor: "pointer",
+                  fontSize: "10px",
+                  fontWeight: 700,
+                }}
+              >
+                {value}
+              </button>
+
+            ))}
+
+          </div>
+
+        </div>
+
+
+        {selectedScanner && (
+
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: "16px",
+              padding: "8px 20px",
+              borderBottom: "1px solid #10281b",
+              background: "#050d08",
+              fontSize: "10px",
+              color: "#809487",
+            }}
+          >
+
+            <SignalBadge
+              signal={selectedScanner.signal}
+            />
+
+            <span>
+              TREND{" "}
+              <strong>
+                {selectedScanner.trend}
+              </strong>
+            </span>
+
+            <span>
+              CONFIDENCE{" "}
+              <strong>
+                {
+                  selectedScanner.analysis
+                    .confidence
+                }
+                %
+              </strong>
+            </span>
+
+            <span>
+              GRADE{" "}
+              <strong>
+                {selectedScanner.grade}
+              </strong>
+            </span>
+
+          </div>
+
+        )}
+
+
+        <div
+          style={{
+            flex: 1,
+            minHeight: 0,
+            padding: "10px 18px 0",
+            overflow: "hidden",
+          }}
+        >
+
+          {chartLoading ? (
+
+            <StockLoader />
+
+          ) : chartData.length > 0 ? (
+
+            <StockChart
+              data={chartData}
+              interval={timeframe}
+              height={680}
+            />
+
+          ) : (
+
+            <div
+              style={{
+                height: "100%",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "#63766a",
+              }}
+            >
+              No {timeframe} candles available for{" "}
+              {selected}
+            </div>
+
+          )}
+
+        </div>
+
+
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            padding: "9px 20px",
+            borderTop: "1px solid #163425",
+            background: "#07100b",
+            color: "#667c6e",
+            fontSize: "9px",
+          }}
+        >
+
+          <span>
+            TIMEFRAME{" "}
+            <strong>
+              {timeframe}
+            </strong>
+          </span>
+
+          <span>
+            CANDLES{" "}
+            <strong>
+              {chartData.length}
+            </strong>
+          </span>
+
+          <span>
+            EMA 20
+          </span>
+
+          <span>
+            ESC TO CLOSE
+          </span>
+
+        </div>
+
+      </div>
+
+    )}
+
       {/* =================================================
           SIDEBAR
       ================================================= */}
@@ -1946,15 +2873,15 @@ const timer =
                   string,
                   DashboardView
                 > = {
-                  OVERVIEW: "overview",
-                  "AI SCANNER": "scanner",
-                  WATCHLIST: "watchlist",
-                  PORTFOLIO: "portfolio",
-                  ALERTS: "alerts",
-                  BACKTEST: "backtest",
-                  ANALYTICS: "analytics",
-                  SETTINGS: "settings",
-                };
+                OVERVIEW: "overview",
+                "AI SCANNER": "scanner",
+                WATCHLIST: "watchlist",
+                PORTFOLIO: "portfolio",
+                ALERTS: "alerts",
+                BACKTEST: "backtest",
+                ANALYTICS: "analytics",
+                SETTINGS: "settings",
+              };
 
               const itemView =
                 viewMap[title] ||
@@ -1962,47 +2889,47 @@ const timer =
 
               return (
 
-              <button
-                key={
-                  title
-                }
-                onClick={
-                  () =>
-                    handleNavigation(
-                      title
-                    )
-                }
-                className={
-                  activeView ===
-                  itemView
-                    ? "nav-item active"
-                    : "nav-item"
-                }
-              >
+                <button
+                  key={
+                    title
+                  }
+                  onClick={
+                    () =>
+                      handleNavigation(
+                        title
+                      )
+                  }
+                  className={
+                    activeView ===
+                      itemView
+                      ? "nav-item active"
+                      : "nav-item"
+                  }
+                >
 
-                <span className="nav-icon">
-                  {icon}
-                </span>
-
-
-                <span className="nav-copy">
-
-                  <strong>
-                    {title}
-                  </strong>
-
-                  <small>
-                    {subtitle}
-                  </small>
-
-                </span>
+                  <span className="nav-icon">
+                    {icon}
+                  </span>
 
 
-                <span className="nav-arrow">
-                  ›
-                </span>
+                  <span className="nav-copy">
 
-              </button>
+                    <strong>
+                      {title}
+                    </strong>
+
+                    <small>
+                      {subtitle}
+                    </small>
+
+                  </span>
+
+
+                  <span className="nav-arrow">
+                    ›
+                  </span>
+
+                </button>
 
               );
             }
@@ -2100,105 +3027,105 @@ const timer =
 
 
             {searchOpen &&
-            searchQuery.trim() && (
-              <div
-                style={{
-                  position: "absolute",
-                  top: "calc(100% + 8px)",
-                  left: 0,
-                  right: 0,
-                  zIndex: 100,
-                  border:
-                    "1px solid #173450",
-                  borderRadius: "7px",
-                  background: "#030914",
-                  maxHeight: "320px",
-                  overflowY: "auto",
-                  boxShadow:
-                    "0 20px 60px rgba(0,0,0,.45)",
-                }}
-              >
+              searchQuery.trim() && (
+                <div
+                  style={{
+                    position: "absolute",
+                    top: "calc(100% + 8px)",
+                    left: 0,
+                    right: 0,
+                    zIndex: 100,
+                    border:
+                      "1px solid #173450",
+                    borderRadius: "7px",
+                    background: "#030914",
+                    maxHeight: "320px",
+                    overflowY: "auto",
+                    boxShadow:
+                      "0 20px 60px rgba(0,0,0,.45)",
+                  }}
+                >
 
-                {searchResults.length > 0 ? (
-                  searchResults.map(
-                    (item) => (
-                      <button
-                        key={`${item.symbol}-${item.token}`}
-                        type="button"
-                        onClick={
-                          () =>
-                            addInstrumentToWatchlist(
-                              item
-                            )
-                        }
-                        style={{
-                          width: "100%",
-                          display: "flex",
-                          alignItems:
-                            "center",
-                          justifyContent:
-                            "space-between",
-                          gap: "12px",
-                          padding:
-                            "12px 14px",
-                          border: "none",
-                          borderBottom:
-                            "1px solid #102238",
-                          background:
-                            "transparent",
-                          color: "#dffaff",
-                          textAlign: "left",
-                        }}
-                      >
-                        <span>
-                          <strong
-                            style={{
-                              display:
-                                "block",
-                            }}
-                          >
-                            {item.symbol}
-                          </strong>
-
-                          <small
-                            style={{
-                              color:
-                                "#71869c",
-                            }}
-                          >
-                            {item.name}
-                          </small>
-                        </span>
-
-                        <span
+                  {searchResults.length > 0 ? (
+                    searchResults.map(
+                      (item) => (
+                        <button
+                          key={`${item.symbol}-${item.token}`}
+                          type="button"
+                          onClick={
+                            () =>
+                              addInstrumentToWatchlist(
+                                item
+                              )
+                          }
                           style={{
-                            color:
-                              "#00f59b",
-                            fontSize:
-                              "10px",
-                            fontWeight: 700,
+                            width: "100%",
+                            display: "flex",
+                            alignItems:
+                              "center",
+                            justifyContent:
+                              "space-between",
+                            gap: "12px",
+                            padding:
+                              "12px 14px",
+                            border: "none",
+                            borderBottom:
+                              "1px solid #102238",
+                            background:
+                              "transparent",
+                            color: "#dffaff",
+                            textAlign: "left",
                           }}
                         >
-                          ADD
-                        </span>
-                      </button>
-                    )
-                  )
-                ) : (
-                  <div
-                    style={{
-                      padding: "14px",
-                      color: "#71869c",
-                      fontSize:
-                        "11px",
-                    }}
-                  >
-                    No NSE instruments found
-                  </div>
-                )}
+                          <span>
+                            <strong
+                              style={{
+                                display:
+                                  "block",
+                              }}
+                            >
+                              {item.symbol}
+                            </strong>
 
-              </div>
-            )}
+                            <small
+                              style={{
+                                color:
+                                  "#71869c",
+                              }}
+                            >
+                              {item.name}
+                            </small>
+                          </span>
+
+                          <span
+                            style={{
+                              color:
+                                "#00f59b",
+                              fontSize:
+                                "10px",
+                              fontWeight: 700,
+                            }}
+                          >
+                            ADD
+                          </span>
+                        </button>
+                      )
+                    )
+                  ) : (
+                    <div
+                      style={{
+                        padding: "14px",
+                        color: "#71869c",
+                        fontSize:
+                          "11px",
+                      }}
+                    >
+                      No NSE instruments found
+                    </div>
+                  )}
+
+                </div>
+              )}
 
           </div>
 
@@ -2214,35 +3141,35 @@ const timer =
           </div>
 
 
-<div className="clock">
+          <div className="clock">
 
-  <strong>
-    {clock
-      ? clock.toLocaleTimeString(
-          "en-IN"
-        )
-      : "--:--:--"}
-  </strong>
+            <strong>
+              {clock
+                ? clock.toLocaleTimeString(
+                  "en-IN"
+                )
+                : "--:--:--"}
+            </strong>
 
-  <span>
-    {clock
-      ? clock
-          .toLocaleDateString(
-            "en-GB",
-            {
-              day:
-                "2-digit",
-              month:
-                "short",
-              year:
-                "numeric",
-            }
-          )
-          .toUpperCase()
-      : "---"}
-  </span>
+            <span>
+              {clock
+                ? clock
+                  .toLocaleDateString(
+                    "en-GB",
+                    {
+                      day:
+                        "2-digit",
+                      month:
+                        "short",
+                      year:
+                        "numeric",
+                    }
+                  )
+                  .toUpperCase()
+                : "---"}
+            </span>
 
-</div>
+          </div>
 
 
           <div className="core-status">
@@ -2268,6 +3195,8 @@ const timer =
 
         </header>
 
+
+
         {activeView === "overview" && (
           <OverviewPanel
             stocks={stocks}
@@ -2284,13 +3213,35 @@ const timer =
           />
         )}
 
+        {/* ==========================================
+    MARKET RADAR
+========================================== */}
 
+        {activeView === "radar" && (
+
+          <MarketRadarPanel
+            apiBase={API_BASE}
+            liveStocks={stocks}
+            scanners={scanners}
+
+            onOpenStock={(symbol) => {
+              openFullScreenChart(
+                symbol
+              );
+            }}
+
+            onAddToWatchlist={
+              addInstrumentToWatchlist
+            }
+          />
+
+        )}
 
         {/* ===============================================
             TOP CARDS
         =============================================== */}
 
-       
+
 
 
         {/* ===============================================
@@ -2298,121 +3249,267 @@ const timer =
         =============================================== */}
 
         {activeView === "watchlist" && (
-        <section className="primary-grid">
+          <section className="primary-grid">
 
 
-          {/* =============================================
+            {/* =============================================
               CHART
           ============================================= */}
 
-          <div className="glass chart-card">
+            <div className="glass chart-card">
 
-            <div className="card-heading">
-
-
-              <div>
-
-                <span className="eyebrow">
-                  LIVE CHART
-                </span>
+              <div className="card-heading">
 
 
-                <h2>
+                <div>
 
-                  {selected ||
-                    "SELECT STOCK"}
-
-                  <small>
-                    {" "}
-                    • NSE
-                  </small>
-
-                </h2>
+                  <span className="eyebrow">
+                    LIVE CHART
+                  </span>
 
 
-                <div className="hero-price">
+                  <h2>
 
-                  {selectedStock
-                    ? `₹ ${selectedStock.ltp.toFixed(
+                    {selected ||
+                      "SELECT STOCK"}
+
+                    <small>
+                      {" "}
+                      • NSE
+                    </small>
+
+                  </h2>
+
+
+                  <div className="hero-price">
+
+                    {selectedStock
+                      ? `₹ ${selectedStock.ltp.toFixed(
                         2
                       )}`
-                    : "Waiting for market data"}
+                      : "Waiting for market data"}
+
+                  </div>
+
+
+                  {selectedScanner && (
+
+                    <div className="selected-signal-strip">
+
+
+                      <SignalBadge
+                        signal={
+                          selectedScanner.signal
+                        }
+                      />
+
+
+                      <span
+                        className={
+                          trendClass(
+                            selectedScanner
+                              .trend
+                          )
+                        }
+                      >
+
+                        {
+                          selectedScanner
+                            .trend
+                        }
+
+                      </span>
+
+
+                      <span>
+
+                        CONFIDENCE{" "}
+                        {
+                          selectedScanner
+                            .analysis
+                            .confidence
+                        }
+                        %
+
+                      </span>
+
+
+                      <span>
+
+                        {
+                          selectedScanner
+                            .analysis
+                            .probability_label
+                        }
+
+                      </span>
+
+
+                      <span>
+
+                        GRADE{" "}
+                        {
+                          selectedScanner
+                            .grade
+                        }
+
+                      </span>
+
+
+                      <span>
+
+                        {
+                          selectedScanner
+                            .execution
+                            .status
+                        }
+
+                      </span>
+
+                    </div>
+
+                  )}
 
                 </div>
 
 
-                {selectedScanner && (
+                <div
+                  className="timeframes"
+                  style={{
+                    display:
+                      "flex",
 
-                  <div className="selected-signal-strip">
+                    alignItems:
+                      "center",
 
+                    gap:
+                      "8px",
+                  }}
+                >
+                  <span
+                    style={{
+                      color:
+                        "#71869c",
 
-                    <SignalBadge
-                      signal={
-                        selectedScanner.signal
-                      }
-                    />
+                      fontSize:
+                        "9px",
 
+                      fontWeight:
+                        700,
 
-                    <span
-                      className={
-                        trendClass(
-                          selectedScanner
-                            .trend
+                      letterSpacing:
+                        ".08em",
+                    }}
+                  >
+                    TIMEFRAME
+                  </span>
+
+                  <select
+                    value={
+                      timeframe
+                    }
+
+                    onChange={
+                      (
+                        event
+                      ) =>
+                        setTimeframe(
+                          event.target
+                            .value as
+                          ChartTimeframe
                         )
-                      }
-                    >
+                    }
 
-                      {
-                        selectedScanner
-                          .trend
-                      }
+                    style={{
+                      minWidth:
+                        "135px",
 
-                    </span>
+                      padding:
+                        "8px 11px",
 
+                      border:
+                        "1px solid #1f4534",
+
+                      borderRadius:
+                        "6px",
+
+                      outline:
+                        "none",
+
+                      background:
+                        "#07100b",
+
+                      color:
+                        "#dff8e9",
+
+                      fontSize:
+                        "10px",
+
+                      fontWeight:
+                        700,
+
+                      cursor:
+                        "pointer",
+                    }}
+                  >
+                    <option value="15s">
+                      15 Seconds
+                    </option>
+
+                    <option value="1m">
+                      1 Minute
+                    </option>
+
+                    <option value="5m">
+                      5 Minutes
+                    </option>
+
+                    <option value="15m">
+                      15 Minutes
+                    </option>
+
+                    <option value="1D">
+                      1 Day
+                    </option>
+
+                    <option value="1W">
+                      1 Week
+                    </option>
+
+                    <option value="1M">
+                      1 Month
+                    </option>
+                  </select>
+                </div>
+
+              </div>
+
+
+              <div className="future-chart real-chart">
+
+                {chartLoading ? (
+
+                  <StockLoader />
+
+                ) : chartData.length > 0 ? (
+
+                  <StockChart
+                    data={chartData}
+                    interval={timeframe}
+                  />
+
+                ) : (
+
+                  <div className="chart-message">
+
+                    <div className="pulse-line" />
+
+                    <strong>
+                      WAITING FOR CANDLES
+                    </strong>
 
                     <span>
-
-                      CONFIDENCE{" "}
-                      {
-                        selectedScanner
-                          .analysis
-                          .confidence
-                      }
-                      %
-
-                    </span>
-
-
-                    <span>
-
-                      {
-                        selectedScanner
-                          .analysis
-                          .probability_label
-                      }
-
-                    </span>
-
-
-                    <span>
-
-                      GRADE{" "}
-                      {
-                        selectedScanner
-                          .grade
-                      }
-
-                    </span>
-
-
-                    <span>
-
-                      {
-                        selectedScanner
-                          .execution
-                          .status
-                      }
-
+                      No {timeframe} candles available
                     </span>
 
                   </div>
@@ -2422,384 +3519,208 @@ const timer =
               </div>
 
 
-<div
-  className="timeframes"
-  style={{
-    display:
-      "flex",
+              <div className="chart-meta">
 
-    alignItems:
-      "center",
+                <span>
 
-    gap:
-      "8px",
-  }}
->
-  <span
-    style={{
-      color:
-        "#71869c",
-
-      fontSize:
-        "9px",
-
-      fontWeight:
-        700,
-
-      letterSpacing:
-        ".08em",
-    }}
-  >
-    TIMEFRAME
-  </span>
-
-  <select
-    value={
-      timeframe
-    }
-
-    onChange={
-      (
-        event
-      ) =>
-        setTimeframe(
-          event.target
-            .value as
-            ChartTimeframe
-        )
-    }
-
-    style={{
-      minWidth:
-        "135px",
-
-      padding:
-        "8px 11px",
-
-      border:
-        "1px solid #1f4534",
-
-      borderRadius:
-        "6px",
-
-      outline:
-        "none",
-
-      background:
-        "#07100b",
-
-      color:
-        "#dff8e9",
-
-      fontSize:
-        "10px",
-
-      fontWeight:
-        700,
-
-      cursor:
-        "pointer",
-    }}
-  >
-    <option value="15s">
-      15 Seconds
-    </option>
-
-          <option value="1m">
-          1 Minute
-          </option>
-
-         <option value="5m">
-          5 Minutes
-          </option>
-
-          <option value="15m">
-           15 Minutes
-          </option>
-
-         <option value="1D">
-           1 Day
-             </option>
-
-             <option value="1W">
-             1 Week
-             </option>
-
-             <option value="1M">
-               1 Month
-                   </option>
-                     </select>
-          </div>
-
-            </div>
-
-
-            <div className="future-chart real-chart">
-
-              {chartLoading &&
-              chartData.length ===
-                0 ? (
-
-                <div className="chart-message">
-
-                  <div className="pulse-line" />
+                  TIMEFRAME
 
                   <strong>
-                    LOADING MARKET DATA
+                    {timeframe}
                   </strong>
 
-                  <span>
+                </span>
 
-                    Loading{" "}
-                    {timeframe}
-                    {" "}
-                    candles for{" "}
-                    {selected}
 
-                  </span>
+                <span>
 
-                </div>
-
-              ) : chartData.length >
-                0 ? (
-
-                <StockChart
-                  data={
-                    chartData
-                  }
-                  interval={
-                    timeframe
-                  }
-                />
-
-              ) : (
-
-                <div className="chart-message">
-
-                  <div className="pulse-line" />
+                  CANDLES
 
                   <strong>
-                    WAITING FOR CANDLES
+                    {
+                      chartData.length
+                    }
                   </strong>
 
-                  <span>
-
-                    No{" "}
-                    {timeframe}
-                    {" "}
-                    candles available
-
-                  </span>
-
-                </div>
-
-              )}
-
-            </div>
+                </span>
 
 
-            <div className="chart-meta">
+                <span>
 
-              <span>
+                  EMA
 
-                TIMEFRAME
+                  <strong>
+                    EMA 20
+                  </strong>
 
-                <strong>
-                  {timeframe}
-                </strong>
-
-              </span>
+                </span>
 
 
-              <span>
+                <span>
 
-                CANDLES
+                  LAST FEED
 
-                <strong>
-                  {
-                    chartData.length
-                  }
-                </strong>
+                  <strong>
 
-              </span>
-
-
-              <span>
-
-                EMA
-
-                <strong>
-                  EMA 20
-                </strong>
-
-              </span>
-
-
-              <span>
-
-                LAST FEED
-
-                <strong>
-
-                  {lastMarketUpdate
-                    ? new Date(
+                    {lastMarketUpdate
+                      ? new Date(
                         lastMarketUpdate
                       )
                         .toLocaleTimeString(
                           "en-IN"
                         )
-                    : "—"}
+                      : "—"}
 
-                </strong>
+                  </strong>
 
-              </span>
+                </span>
+
+              </div>
 
             </div>
 
-          </div>
 
-
-          {/* =============================================
+            {/* =============================================
               WATCHLIST
           ============================================= */}
 
-          <div id="watchlist-section" className="glass watchlist-card">
+            <div id="watchlist-section" className="glass watchlist-card">
 
-            <div className="card-heading compact">
+              <div className="card-heading compact">
 
-              <span className="eyebrow">
-                〽 LIVE WATCHLIST
-              </span>
+                <span className="eyebrow">
+                  〽 LIVE WATCHLIST
+                </span>
 
-              <span className="counter">
-                {stocks.length}
-              </span>
+                <span className="counter">
+                  {stocks.length}
+                </span>
 
-            </div>
-
-
-            <div className="watch-head">
-
-              <span>
-                SYMBOL
-              </span>
-
-              <span>
-                LTP
-              </span>
-
-              <span>
-                VOLUME
-              </span>
-
-              <span>
-                SIGNAL
-              </span>
-
-            </div>
+              </div>
 
 
-            <div className="watch-scroll">
+              <div className="watch-head">
 
-              {sortedStocks.length ===
-              0 ? (
+                <span>
+                  SYMBOL
+                </span>
 
-                <div className="waiting">
+                <span>
+                  LTP
+                </span>
 
-                  Waiting for
-                  Angel One live
-                  market data...
+                <span>
+                  VOLUME
+                </span>
 
-                </div>
+                <span>
+                  SIGNAL
+                </span>
 
-              ) : (
+              </div>
 
-                sortedStocks.map(
-                  (stock) => {
 
-                    const scanner =
-                      scanners[
+              <div className="watch-scroll">
+
+                {sortedStocks.length ===
+                  0 ? (
+
+                  <div className="waiting">
+
+                    Waiting for
+                    Angel One live
+                    market data...
+
+                  </div>
+
+                ) : (
+
+                  sortedStocks.map(
+                    (stock) => {
+
+                      const scanner =
+                        scanners[
                         stock.symbol
-                      ];
+                        ];
 
 
-                    return (
+                      return (
 
-                      <button
-                        key={
-                          stock.symbol
-                        }
-                        className={
-                          stock.symbol ===
-                          selected
-                            ? "watch-row selected-stock"
-                            : "watch-row"
-                        }
-                        onClick={
-                          () =>
-                            setSelected(
-                              stock.symbol
-                            )
-                        }
-                      >
-
-                        <strong>
-
-                          {
+                        <button
+                          key={
                             stock.symbol
                           }
+                          className={
+                            stock.symbol ===
+                              selected
+                              ? "watch-row selected-stock"
+                              : "watch-row"
+                          }
+                          onClick={
+                            () =>
+                              openFullScreenChart(
+                                stock.symbol
+                              )
+                          }
+                        >
 
-                        </strong>
+                          <strong>
+
+                            {
+                              stock.symbol
+                            }
+
+                          </strong>
 
 
-                        <span className="live-price">
+                          <span className="live-price">
 
-                          ₹
-                          {stock.ltp.toFixed(
-                            2
+                            ₹
+                            {stock.ltp.toFixed(
+                              2
+                            )}
+
+                          </span>
+
+
+                          <span>
+
+                            {stock.volume ??
+                              "—"}
+
+                          </span>
+
+
+                          {scanner ? (
+
+                            <SignalBadge
+                              signal={
+                                scanner.signal
+                              }
+                              small
+                            />
+
+                          ) : (
+
+                            <b>
+                              LIVE
+                            </b>
+
                           )}
 
-                        </span>
+                        </button>
 
+                      );
+                    }
+                  )
 
-                        <span>
+                )}
 
-                          {stock.volume ??
-                            "—"}
-
-                        </span>
-
-
-                        {scanner ? (
-
-                          <SignalBadge
-                            signal={
-                              scanner.signal
-                            }
-                            small
-                          />
-
-                        ) : (
-
-                          <b>
-                            LIVE
-                          </b>
-
-                        )}
-
-                      </button>
-
-                    );
-                  }
-                )
-
-              )}
+              </div>
 
             </div>
 
-          </div>
-
-        </section>
+          </section>
         )}
 
 
@@ -2807,738 +3728,743 @@ const timer =
             AI AREA
         =============================================== */}
 
-       {activeView === "scanner" && (
-        <ScannerPanel
-         stocks={stocks}
-         scanners={scanners}
-         selected={selected}
-         scannerLoading={scannerLoading}
-         status={status}
-         lastMarketUpdate={lastMarketUpdate}
-         onSelectSymbol={(symbol: string) => {
-         setSelected(symbol);
-         }}
-         onOpenChart={(symbol: string) => {
-         setSelected(symbol);
-         setActiveView("watchlist");
-         }}
-        />
-       )}
+        {activeView === "scanner" && (
+          <ScannerPanel
+            stocks={stocks}
+            scanners={scanners}
+            selected={selected}
+            scannerLoading={scannerLoading}
+            status={status}
+            lastMarketUpdate={lastMarketUpdate}
+            onSelectSymbol={(symbol: string) => {
+              setSelected(symbol);
+            }}
+            onOpenChart={(
+              symbol: string
+            ) => {
+
+              openFullScreenChart(
+                symbol
+              );
+
+            }}
+          />
+        )}
 
         {activeView === "portfolio" && (
-        <section
-          id="portfolio-section"
-          className="glass"
-          style={{
-            marginTop: "12px",
-            padding: "18px",
-          }}
-        >
-          <div className="card-heading compact">
-            <div>
-              <span className="eyebrow">
-                ▣ PORTFOLIO
-              </span>
-              <h2>
-                Holdings & P/L
-              </h2>
-            </div>
-
-            <button
-              type="button"
-              onClick={
-                () =>
-                  void loadPortfolio()
-              }
-              className="selected-time"
-            >
-              {portfolioLoading
-                ? "LOADING..."
-                : "REFRESH"}
-            </button>
-          </div>
-
-          <div
-            className="trade-detail-grid"
+          <section
+            id="portfolio-section"
+            className="glass"
             style={{
-              marginTop: "14px",
+              marginTop: "12px",
+              padding: "18px",
             }}
           >
-            <div>
-              <span>
-                CURRENT VALUE
-              </span>
-              <strong>
-                {formatPrice(
-                  totalPortfolioValue
-                )}
-              </strong>
-            </div>
+            <div className="card-heading compact">
+              <div>
+                <span className="eyebrow">
+                  ▣ PORTFOLIO
+                </span>
+                <h2>
+                  Holdings & P/L
+                </h2>
+              </div>
 
-            <div>
-              <span>
-                UNREALIZED P/L
-              </span>
-              <strong
-                className={
-                  totalPortfolioPnl >= 0
-                    ? "trend-bullish"
-                    : "trend-bearish"
+              <button
+                type="button"
+                onClick={
+                  () =>
+                    void loadPortfolio()
                 }
+                className="selected-time"
               >
-                {formatPrice(
-                  totalPortfolioPnl
-                )}
-              </strong>
+                {portfolioLoading
+                  ? "LOADING..."
+                  : "REFRESH"}
+              </button>
             </div>
-          </div>
 
-          {portfolioMessage && (
             <div
+              className="trade-detail-grid"
               style={{
-                marginTop: "10px",
-                color: "#7af5ff",
-                fontSize: "10px",
+                marginTop: "14px",
               }}
             >
-              {portfolioMessage}
-            </div>
-          )}
+              <div>
+                <span>
+                  CURRENT VALUE
+                </span>
+                <strong>
+                  {formatPrice(
+                    totalPortfolioValue
+                  )}
+                </strong>
+              </div>
 
-          <div
-            style={{
-              marginTop: "14px",
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                justifyContent:
-                  "space-between",
-                alignItems:
-                  "center",
-                marginBottom:
-                  "8px",
-                color: "#71869c",
-                fontSize: "10px",
-              }}
-            >
-              <span>
-                HOLDINGS
-              </span>
-              <span>
-                {holdings.length} stock{holdings.length === 1 ? "" : "s"}
-              </span>
+              <div>
+                <span>
+                  UNREALIZED P/L
+                </span>
+                <strong
+                  className={
+                    totalPortfolioPnl >= 0
+                      ? "trend-bullish"
+                      : "trend-bearish"
+                  }
+                >
+                  {formatPrice(
+                    totalPortfolioPnl
+                  )}
+                </strong>
+              </div>
             </div>
 
-            {holdings.length === 0 ? (
+            {portfolioMessage && (
               <div
                 style={{
-                  padding:
-                    "16px 0",
-                  color:
-                    "#71869c",
-                  fontSize:
-                    "11px",
+                  marginTop: "10px",
+                  color: "#7af5ff",
+                  fontSize: "10px",
                 }}
               >
-                No holdings loaded yet.
+                {portfolioMessage}
               </div>
-            ) : (
+            )}
+
             <div
               style={{
-                overflowX:
-                  "auto",
+                marginTop: "14px",
               }}
             >
-            <table
-              style={{
-                width: "100%",
-                borderCollapse:
-                  "collapse",
-                fontSize: "11px",
-              }}
-            >
-              <thead>
-                <tr
-                  style={{
-                    color: "#71869c",
-                    textAlign: "left",
-                  }}
-                >
-                  <th style={{ padding: "8px" }}>SYMBOL</th>
-                  <th style={{ padding: "8px" }}>QTY</th>
-                  <th style={{ padding: "8px" }}>AVG</th>
-                  <th style={{ padding: "8px" }}>CURRENT</th>
-                  <th style={{ padding: "8px" }}>VALUE</th>
-                  <th style={{ padding: "8px" }}>P/L</th>
-                </tr>
-              </thead>
-
-              <tbody>
-                {holdings.map(
-                  (item) => (
-                    <tr
-                      key={
-                        item.symbol
-                      }
-                      style={{
-                        borderTop:
-                          "1px solid #102238",
-                      }}
-                    >
-                      <td style={{ padding: "8px" }}>
-                        <strong>
-                          {item.symbol}
-                        </strong>
-                      </td>
-                      <td style={{ padding: "8px" }}>
-                        {item.quantity}
-                      </td>
-                      <td style={{ padding: "8px" }}>
-                        {formatPrice(
-                          item.average_price
-                        )}
-                      </td>
-                      <td style={{ padding: "8px" }}>
-                        {formatPrice(
-                          item.current_price
-                        )}
-                      </td>
-                      <td style={{ padding: "8px" }}>
-                        {formatPrice(
-                          item.market_value
-                        )}
-                      </td>
-                      <td
-                        style={{
-                          padding: "8px",
-                        }}
-                        className={
-                          (
-                            item.unrealized_pnl ||
-                            0
-                          ) >= 0
-                            ? "trend-bullish"
-                            : "trend-bearish"
-                        }
-                      >
-                        {formatPrice(
-                          item.unrealized_pnl
-                        )}
-                      </td>
-                    </tr>
-                  )
-                )}
-              </tbody>
-            </table>
-            </div>
-            )}
-          </div>
-
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns:
-                "repeat(auto-fit, minmax(260px, 1fr))",
-              gap: "12px",
-              marginTop: "16px",
-            }}
-          >
-            <form
-              onSubmit={
-                saveHolding
-              }
-              className="pattern-box"
-            >
-              <span>
-                ADD / UPDATE HOLDING
-              </span>
-
-              {[
-                ["symbol", "Symbol"],
-                ["name", "Company name"],
-                ["token", "Angel token"],
-                ["quantity", "Quantity"],
-                [
-                  "average_price",
-                  "Average buy price",
-                ],
-              ].map(
-                ([name, label]) => (
-                  <input
-                    key={name}
-                    name={name}
-                    required={
-                      name !==
-                      "token"
-                    }
-                    type={
-                      name ===
-                        "quantity" ||
-                      name ===
-                        "average_price"
-                        ? "number"
-                        : "text"
-                    }
-                    step="any"
-                    placeholder={label}
-                    style={{
-                      width: "100%",
-                      marginTop: "8px",
-                      padding:
-                        "10px",
-                      border:
-                        "1px solid #173450",
-                      background:
-                        "#030914",
-                      color:
-                        "#dffaff",
-                    }}
-                  />
-                )
-              )}
-
-              <button
-                type="submit"
-                className="selected-time"
+              <div
                 style={{
-                  width: "100%",
-                  marginTop: "10px",
-                }}
-              >
-                SAVE HOLDING
-              </button>
-            </form>
-
-            <form
-              onSubmit={
-                importPortfolioCsv
-              }
-              className="pattern-box"
-            >
-              <span>
-                IMPORT PORTFOLIO CSV
-              </span>
-
-              <p
-                style={{
+                  display: "flex",
+                  justifyContent:
+                    "space-between",
+                  alignItems:
+                    "center",
+                  marginBottom:
+                    "8px",
                   color: "#71869c",
                   fontSize: "10px",
-                  lineHeight: 1.6,
                 }}
               >
-                Headers: symbol,
-                name, quantity,
-                average_price.
-                token is optional.
-              </p>
+                <span>
+                  HOLDINGS
+                </span>
+                <span>
+                  {holdings.length} stock{holdings.length === 1 ? "" : "s"}
+                </span>
+              </div>
 
-              <input
-                name="file"
-                type="file"
-                accept=".csv,text/csv"
-                style={{
-                  width: "100%",
-                  marginTop: "10px",
-                  color: "#dffaff",
-                }}
-              />
+              {holdings.length === 0 ? (
+                <div
+                  style={{
+                    padding:
+                      "16px 0",
+                    color:
+                      "#71869c",
+                    fontSize:
+                      "11px",
+                  }}
+                >
+                  No holdings loaded yet.
+                </div>
+              ) : (
+                <div
+                  style={{
+                    overflowX:
+                      "auto",
+                  }}
+                >
+                  <table
+                    style={{
+                      width: "100%",
+                      borderCollapse:
+                        "collapse",
+                      fontSize: "11px",
+                    }}
+                  >
+                    <thead>
+                      <tr
+                        style={{
+                          color: "#71869c",
+                          textAlign: "left",
+                        }}
+                      >
+                        <th style={{ padding: "8px" }}>SYMBOL</th>
+                        <th style={{ padding: "8px" }}>QTY</th>
+                        <th style={{ padding: "8px" }}>AVG</th>
+                        <th style={{ padding: "8px" }}>CURRENT</th>
+                        <th style={{ padding: "8px" }}>VALUE</th>
+                        <th style={{ padding: "8px" }}>P/L</th>
+                      </tr>
+                    </thead>
 
-              <button
-                type="submit"
-                className="selected-time"
-                disabled={
-                  portfolioLoading
+                    <tbody>
+                      {holdings.map(
+                        (item) => (
+                          <tr
+                            key={
+                              item.symbol
+                            }
+                            style={{
+                              borderTop:
+                                "1px solid #102238",
+                            }}
+                          >
+                            <td style={{ padding: "8px" }}>
+                              <strong>
+                                {item.symbol}
+                              </strong>
+                            </td>
+                            <td style={{ padding: "8px" }}>
+                              {item.quantity}
+                            </td>
+                            <td style={{ padding: "8px" }}>
+                              {formatPrice(
+                                item.average_price
+                              )}
+                            </td>
+                            <td style={{ padding: "8px" }}>
+                              {formatPrice(
+                                item.current_price
+                              )}
+                            </td>
+                            <td style={{ padding: "8px" }}>
+                              {formatPrice(
+                                item.market_value
+                              )}
+                            </td>
+                            <td
+                              style={{
+                                padding: "8px",
+                              }}
+                              className={
+                                (
+                                  item.unrealized_pnl ||
+                                  0
+                                ) >= 0
+                                  ? "trend-bullish"
+                                  : "trend-bearish"
+                              }
+                            >
+                              {formatPrice(
+                                item.unrealized_pnl
+                              )}
+                            </td>
+                          </tr>
+                        )
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns:
+                  "repeat(auto-fit, minmax(260px, 1fr))",
+                gap: "12px",
+                marginTop: "16px",
+              }}
+            >
+              <form
+                onSubmit={
+                  saveHolding
                 }
-                style={{
-                  width: "100%",
-                  marginTop: "10px",
-                }}
+                className="pattern-box"
               >
-                IMPORT CSV
-              </button>
-            </form>
-          </div>
-        </section>
+                <span>
+                  ADD / UPDATE HOLDING
+                </span>
+
+                {[
+                  ["symbol", "Symbol"],
+                  ["name", "Company name"],
+                  ["token", "Angel token"],
+                  ["quantity", "Quantity"],
+                  [
+                    "average_price",
+                    "Average buy price",
+                  ],
+                ].map(
+                  ([name, label]) => (
+                    <input
+                      key={name}
+                      name={name}
+                      required={
+                        name !==
+                        "token"
+                      }
+                      type={
+                        name ===
+                          "quantity" ||
+                          name ===
+                          "average_price"
+                          ? "number"
+                          : "text"
+                      }
+                      step="any"
+                      placeholder={label}
+                      style={{
+                        width: "100%",
+                        marginTop: "8px",
+                        padding:
+                          "10px",
+                        border:
+                          "1px solid #173450",
+                        background:
+                          "#030914",
+                        color:
+                          "#dffaff",
+                      }}
+                    />
+                  )
+                )}
+
+                <button
+                  type="submit"
+                  className="selected-time"
+                  style={{
+                    width: "100%",
+                    marginTop: "10px",
+                  }}
+                >
+                  SAVE HOLDING
+                </button>
+              </form>
+
+              <form
+                onSubmit={
+                  importPortfolioCsv
+                }
+                className="pattern-box"
+              >
+                <span>
+                  IMPORT PORTFOLIO CSV
+                </span>
+
+                <p
+                  style={{
+                    color: "#71869c",
+                    fontSize: "10px",
+                    lineHeight: 1.6,
+                  }}
+                >
+                  Headers: symbol,
+                  name, quantity,
+                  average_price.
+                  token is optional.
+                </p>
+
+                <input
+                  name="file"
+                  type="file"
+                  accept=".csv,text/csv"
+                  style={{
+                    width: "100%",
+                    marginTop: "10px",
+                    color: "#dffaff",
+                  }}
+                />
+
+                <button
+                  type="submit"
+                  className="selected-time"
+                  disabled={
+                    portfolioLoading
+                  }
+                  style={{
+                    width: "100%",
+                    marginTop: "10px",
+                  }}
+                >
+                  IMPORT CSV
+                </button>
+              </form>
+            </div>
+          </section>
 
 
         )}
 
         {activeView === "alerts" && (
-        <section
-          id="alerts-section"
-          className="glass"
-          style={{
-            marginTop: "12px",
-            padding: "18px",
-          }}
-        >
-          <div className="card-heading compact">
-            <div>
-              <span className="eyebrow">
-                ♢ ALERTS
-              </span>
-              <h2>
-                Smart Notifications
-              </h2>
-            </div>
-
-            <button
-              type="button"
-              onClick={
-                () => {
-                  if (
-                    "Notification" in
-                    window
-                  ) {
-                    void Notification
-                      .requestPermission();
-                  }
-                }
-              }
-              className="selected-time"
-            >
-              ENABLE BROWSER ALERTS
-            </button>
-          </div>
-
-          {alertsMessage && (
-            <div
-              style={{
-                marginTop: "10px",
-                color: "#7af5ff",
-                fontSize: "10px",
-              }}
-            >
-              {alertsMessage}
-            </div>
-          )}
-
-          <div
+          <section
+            id="alerts-section"
+            className="glass"
             style={{
-              display: "grid",
-              gridTemplateColumns:
-                "minmax(0, 1.4fr) minmax(280px, .6fr)",
-              gap: "12px",
-              marginTop: "14px",
+              marginTop: "12px",
+              padding: "18px",
             }}
           >
-            <div
-              className="pattern-box"
-              style={{
-                margin: 0,
-              }}
-            >
-              <span>
-                ACTIVE / TRIGGERED ALERTS
-              </span>
-
-              {alertsLoading ? (
-                <p
-                  style={{
-                    color: "#71869c",
-                    fontSize: "10px",
-                  }}
-                >
-                  Loading alerts...
-                </p>
-              ) : alerts.length === 0 ? (
-                <p
-                  style={{
-                    color: "#71869c",
-                    fontSize: "10px",
-                  }}
-                >
-                  No alerts created yet.
-                </p>
-              ) : (
-                alerts.map(
-                  (alert) => (
-                    <div
-                      key={
-                        alert.id
-                      }
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns:
-                          "1fr auto",
-                        gap: "10px",
-                        alignItems:
-                          "center",
-                        padding:
-                          "10px 0",
-                        borderTop:
-                          "1px solid #102238",
-                      }}
-                    >
-                      <div>
-                        <strong>
-                          {alert.symbol}
-                        </strong>
-
-                        <small
-                          style={{
-                            display:
-                              "block",
-                            color:
-                              "#71869c",
-                            marginTop:
-                              "3px",
-                          }}
-                        >
-                          {alert.condition}{" "}
-                          {formatPrice(
-                            alert.target_price
-                          )}{" "}
-                          •{" "}
-                          {alert.delivery}
-                        </small>
-                      </div>
-
-                      <div
-                        style={{
-                          display:
-                            "flex",
-                          gap: "6px",
-                        }}
-                      >
-                        <button
-                          type="button"
-                          className="selected-time"
-                          onClick={
-                            () =>
-                              void setAlertActive(
-                                alert,
-                                !alert.active
-                              )
-                          }
-                        >
-                          {alert.active
-                            ? "PAUSE"
-                            : "REACTIVATE"}
-                        </button>
-
-                        <button
-                          type="button"
-                          className="selected-time"
-                          onClick={
-                            () =>
-                              void deleteAlert(
-                                alert
-                              )
-                          }
-                        >
-                          DELETE
-                        </button>
-                      </div>
-                    </div>
-                  )
-                )
-              )}
-            </div>
-
-            <form
-              onSubmit={
-                createAlert
-              }
-              className="pattern-box"
-              style={{
-                margin: 0,
-              }}
-            >
-              <span>
-                CREATE ALERT
-              </span>
-
-              <input
-                name="symbol"
-                required
-                placeholder="NSE symbol"
-                style={{
-                  width: "100%",
-                  marginTop: "8px",
-                  padding: "10px",
-                  border:
-                    "1px solid #173450",
-                  background:
-                    "#030914",
-                  color: "#dffaff",
-                }}
-              />
-
-              <input
-                name="name"
-                placeholder="Company name"
-                style={{
-                  width: "100%",
-                  marginTop: "8px",
-                  padding: "10px",
-                  border:
-                    "1px solid #173450",
-                  background:
-                    "#030914",
-                  color: "#dffaff",
-                }}
-              />
-
-              <select
-                name="condition"
-                style={{
-                  width: "100%",
-                  marginTop: "8px",
-                  padding: "10px",
-                  border:
-                    "1px solid #173450",
-                  background:
-                    "#030914",
-                  color: "#dffaff",
-                }}
-              >
-                <option value="ABOVE">
-                  Price rises above
-                </option>
-                <option value="BELOW">
-                  Price falls below
-                </option>
-              </select>
-
-              <input
-                name="target_price"
-                required
-                type="number"
-                min="0.01"
-                step="any"
-                placeholder="Target price"
-                style={{
-                  width: "100%",
-                  marginTop: "8px",
-                  padding: "10px",
-                  border:
-                    "1px solid #173450",
-                  background:
-                    "#030914",
-                  color: "#dffaff",
-                }}
-              />
-
-              <select
-                name="delivery"
-                style={{
-                  width: "100%",
-                  marginTop: "8px",
-                  padding: "10px",
-                  border:
-                    "1px solid #173450",
-                  background:
-                    "#030914",
-                  color: "#dffaff",
-                }}
-              >
-                <option value="BROWSER">
-                  Browser
-                </option>
-                <option value="TELEGRAM">
-                  Telegram
-                </option>
-                <option value="BOTH">
-                  Browser + Telegram
-                </option>
-              </select>
+            <div className="card-heading compact">
+              <div>
+                <span className="eyebrow">
+                  ♢ ALERTS
+                </span>
+                <h2>
+                  Smart Notifications
+                </h2>
+              </div>
 
               <button
-                type="submit"
+                type="button"
+                onClick={
+                  () => {
+                    if (
+                      "Notification" in
+                      window
+                    ) {
+                      void Notification
+                        .requestPermission();
+                    }
+                  }
+                }
                 className="selected-time"
+              >
+                ENABLE BROWSER ALERTS
+              </button>
+            </div>
+
+            {alertsMessage && (
+              <div
                 style={{
-                  width: "100%",
                   marginTop: "10px",
+                  color: "#7af5ff",
+                  fontSize: "10px",
                 }}
               >
-                SAVE ALERT
-              </button>
-            </form>
-          </div>
-        </section>
+                {alertsMessage}
+              </div>
+            )}
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns:
+                  "minmax(0, 1.4fr) minmax(280px, .6fr)",
+                gap: "12px",
+                marginTop: "14px",
+              }}
+            >
+              <div
+                className="pattern-box"
+                style={{
+                  margin: 0,
+                }}
+              >
+                <span>
+                  ACTIVE / TRIGGERED ALERTS
+                </span>
+
+                {alertsLoading ? (
+                  <p
+                    style={{
+                      color: "#71869c",
+                      fontSize: "10px",
+                    }}
+                  >
+                    Loading alerts...
+                  </p>
+                ) : alerts.length === 0 ? (
+                  <p
+                    style={{
+                      color: "#71869c",
+                      fontSize: "10px",
+                    }}
+                  >
+                    No alerts created yet.
+                  </p>
+                ) : (
+                  alerts.map(
+                    (alert) => (
+                      <div
+                        key={
+                          alert.id
+                        }
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns:
+                            "1fr auto",
+                          gap: "10px",
+                          alignItems:
+                            "center",
+                          padding:
+                            "10px 0",
+                          borderTop:
+                            "1px solid #102238",
+                        }}
+                      >
+                        <div>
+                          <strong>
+                            {alert.symbol}
+                          </strong>
+
+                          <small
+                            style={{
+                              display:
+                                "block",
+                              color:
+                                "#71869c",
+                              marginTop:
+                                "3px",
+                            }}
+                          >
+                            {alert.condition}{" "}
+                            {formatPrice(
+                              alert.target_price
+                            )}{" "}
+                            •{" "}
+                            {alert.delivery}
+                          </small>
+                        </div>
+
+                        <div
+                          style={{
+                            display:
+                              "flex",
+                            gap: "6px",
+                          }}
+                        >
+                          <button
+                            type="button"
+                            className="selected-time"
+                            onClick={
+                              () =>
+                                void setAlertActive(
+                                  alert,
+                                  !alert.active
+                                )
+                            }
+                          >
+                            {alert.active
+                              ? "PAUSE"
+                              : "REACTIVATE"}
+                          </button>
+
+                          <button
+                            type="button"
+                            className="selected-time"
+                            onClick={
+                              () =>
+                                void deleteAlert(
+                                  alert
+                                )
+                            }
+                          >
+                            DELETE
+                          </button>
+                        </div>
+                      </div>
+                    )
+                  )
+                )}
+              </div>
+
+              <form
+                onSubmit={
+                  createAlert
+                }
+                className="pattern-box"
+                style={{
+                  margin: 0,
+                }}
+              >
+                <span>
+                  CREATE ALERT
+                </span>
+
+                <input
+                  name="symbol"
+                  required
+                  placeholder="NSE symbol"
+                  style={{
+                    width: "100%",
+                    marginTop: "8px",
+                    padding: "10px",
+                    border:
+                      "1px solid #173450",
+                    background:
+                      "#030914",
+                    color: "#dffaff",
+                  }}
+                />
+
+                <input
+                  name="name"
+                  placeholder="Company name"
+                  style={{
+                    width: "100%",
+                    marginTop: "8px",
+                    padding: "10px",
+                    border:
+                      "1px solid #173450",
+                    background:
+                      "#030914",
+                    color: "#dffaff",
+                  }}
+                />
+
+                <select
+                  name="condition"
+                  style={{
+                    width: "100%",
+                    marginTop: "8px",
+                    padding: "10px",
+                    border:
+                      "1px solid #173450",
+                    background:
+                      "#030914",
+                    color: "#dffaff",
+                  }}
+                >
+                  <option value="ABOVE">
+                    Price rises above
+                  </option>
+                  <option value="BELOW">
+                    Price falls below
+                  </option>
+                </select>
+
+                <input
+                  name="target_price"
+                  required
+                  type="number"
+                  min="0.01"
+                  step="any"
+                  placeholder="Target price"
+                  style={{
+                    width: "100%",
+                    marginTop: "8px",
+                    padding: "10px",
+                    border:
+                      "1px solid #173450",
+                    background:
+                      "#030914",
+                    color: "#dffaff",
+                  }}
+                />
+
+                <select
+                  name="delivery"
+                  style={{
+                    width: "100%",
+                    marginTop: "8px",
+                    padding: "10px",
+                    border:
+                      "1px solid #173450",
+                    background:
+                      "#030914",
+                    color: "#dffaff",
+                  }}
+                >
+                  <option value="BROWSER">
+                    Browser
+                  </option>
+                  <option value="TELEGRAM">
+                    Telegram
+                  </option>
+                  <option value="BOTH">
+                    Browser + Telegram
+                  </option>
+                </select>
+
+                <button
+                  type="submit"
+                  className="selected-time"
+                  style={{
+                    width: "100%",
+                    marginTop: "10px",
+                  }}
+                >
+                  SAVE ALERT
+                </button>
+              </form>
+            </div>
+          </section>
 
 
         )}
 
         {activeView === "backtest" && (
-        <section
-          id="backtest-section"
-          className="glass"
-          style={{
-            marginTop: "12px",
-            padding: "18px",
-          }}
-        >
-          <span className="eyebrow">
-            BACKTEST LAB
-          </span>
-          <p
+          <section
+            id="backtest-section"
+            className="glass"
             style={{
-              color: "#71869c",
-              fontSize: "11px",
-              marginTop: "10px",
+              marginTop: "12px",
+              padding: "18px",
             }}
           >
-            Backtest navigation is active and ready for
-            your V2 backtest endpoints.
-          </p>
-        </section>
+            <span className="eyebrow">
+              BACKTEST LAB
+            </span>
+            <p
+              style={{
+                color: "#71869c",
+                fontSize: "11px",
+                marginTop: "10px",
+              }}
+            >
+              Backtest navigation is active and ready for
+              your V2 backtest endpoints.
+            </p>
+          </section>
 
 
         )}
 
         {activeView === "analytics" && (
-        <section
-          id="analytics-section"
-          className="glass"
-          style={{
-            marginTop: "12px",
-            padding: "18px",
-          }}
-        >
-          <span className="eyebrow">
-            ANALYTICS
-          </span>
-          <p
+          <section
+            id="analytics-section"
+            className="glass"
             style={{
-              color: "#71869c",
-              fontSize: "11px",
-              marginTop: "10px",
+              marginTop: "12px",
+              padding: "18px",
             }}
           >
-            Analytics navigation is active. This is the
-            future home for scanner statistics.
-          </p>
-        </section>
+            <span className="eyebrow">
+              ANALYTICS
+            </span>
+            <p
+              style={{
+                color: "#71869c",
+                fontSize: "11px",
+                marginTop: "10px",
+              }}
+            >
+              Analytics navigation is active. This is the
+              future home for scanner statistics.
+            </p>
+          </section>
 
 
         )}
 
         {activeView === "settings" && (
-        <section
-          id="settings-section"
-          className="glass"
-          style={{
-            marginTop: "12px",
-            padding: "18px",
-          }}
-        >
-          <span className="eyebrow">
-            SETTINGS
-          </span>
-          <p
+          <section
+            id="settings-section"
+            className="glass"
             style={{
-              color: "#71869c",
-              fontSize: "11px",
-              marginTop: "10px",
+              marginTop: "12px",
+              padding: "18px",
             }}
           >
-            Settings navigation is active.
-          </p>
-        </section>
+            <span className="eyebrow">
+              SETTINGS
+            </span>
+            <p
+              style={{
+                color: "#71869c",
+                fontSize: "11px",
+                marginTop: "10px",
+              }}
+            >
+              Settings navigation is active.
+            </p>
+          </section>
 
 
         )}
@@ -3617,7 +4543,7 @@ const timer =
             <b>
 
               {status ===
-              "LIVE"
+                "LIVE"
                 ? "● ONLINE"
                 : "● CHECKING"}
 
@@ -3655,17 +4581,16 @@ function SignalBadge({
     normalized === "BUY"
       ? "signal-badge buy"
       : normalized === "SELL"
-      ? "signal-badge sell"
-      : "signal-badge wait";
+        ? "signal-badge sell"
+        : "signal-badge wait";
 
 
   return (
     <span
-      className={`${className}${
-        small
-          ? " signal-small"
-          : ""
-      }`}
+      className={`${className}${small
+        ? " signal-small"
+        : ""
+        }`}
     >
 
       {normalized}

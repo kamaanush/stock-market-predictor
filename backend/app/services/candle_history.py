@@ -54,9 +54,20 @@ def candle_to_dict(
     candle: CandleHistory,
 ) -> dict[str, float]:
 
+    timestamp = candle.timestamp
+
+    # SQLite returns DateTime values without timezone
+    # information. These values are stored as UTC,
+    # so explicitly restore UTC before converting
+    # them back to Unix epoch seconds.
+    if timestamp.tzinfo is None:
+        timestamp = timestamp.replace(
+            tzinfo=timezone.utc
+        )
+
     return {
         "time": int(
-            candle.timestamp.timestamp()
+            timestamp.timestamp()
         ),
         "open": float(
             candle.open
