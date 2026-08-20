@@ -374,7 +374,7 @@ function calculateOhlc(
 export default function StockChart({
   data,
   interval = "5m",
-  height = 430,
+  height,
 }: {
   data: Candle[];
   interval?: string;

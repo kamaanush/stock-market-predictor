@@ -1100,205 +1100,133 @@ async def refresh_instruments(
     return {"imported": len(instruments)}
 
 
-@app.get(
-    "/api/watchlist",
-    response_model=list[WatchlistOut],
-    dependencies=[Depends(require_owner)],
-)
-async def get_watchlist(
-    session: AsyncSession = Depends(get_session),
-) -> list[WatchlistOut]:
-    items = list(
-        (
-            await session.execute(
-                select(WatchlistItem).order_by(
-                    WatchlistItem.symbol
-                )
-            )
-        ).scalars()
-    )
-
-    quotes = await asyncio.gather(
-        *(
-            market().quote(
-                item.symbol,
-                item.token,
-            )
-            for item in items
-        )
-    )
-
-    by_symbol = {
-        quote.symbol: quote
-        for quote in quotes
-    }
-
-    return [
-        WatchlistOut(
-            symbol=item.symbol,
-            name=item.name,
-            token=item.token,
-            kind=item.kind,
-            last_price=by_symbol[item.symbol].last_price,
-            change_percent=(
-                by_symbol[item.symbol].change_percent
-            ),
-        )
-        for item in items
-    ]
-
-
-@app.post(
-    "/api/watchlist/bulk",
-    dependencies=[Depends(require_owner)],
-)
-async def add_watchlist_bulk(
-    symbols: list[str],
-    session: AsyncSession = Depends(get_session),
-) -> dict[str, Any]:
-    """
-    Add many NSE symbols to the watchlist in one request.
-
-    Example request body:
-    [
-        "RELIANCE",
-        "TCS",
-        "INFY",
-        "SBIN",
-        "ICICIBANK"
-    ]
-    """
-
-    normalized_symbols = []
-
-    for value in symbols:
-        symbol = str(value).strip().upper()
-
-        if (
-            symbol
-            and symbol not in normalized_symbols
-        ):
-            normalized_symbols.append(symbol)
-
-    if not normalized_symbols:
-        raise HTTPException(
-            status_code=422,
-            detail="No valid symbols supplied",
-        )
-
-    # Protect the scanner from accidental massive imports.
-    if len(normalized_symbols) > 500:
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                "Maximum 500 symbols can be added "
-                "in one bulk request"
-            ),
-        )
-
-    instrument_result = await session.execute(
-        select(Instrument).where(
-            Instrument.symbol.in_(
-                normalized_symbols
-            )
-        )
-    )
-
-    instruments = list(
-        instrument_result.scalars()
-    )
-
-    instrument_map = {
-        item.symbol.upper(): item
-        for item in instruments
-    }
-
-    existing_result = await session.execute(
-        select(WatchlistItem.symbol).where(
-            WatchlistItem.symbol.in_(
-                normalized_symbols
-            )
-        )
-    )
-
-    existing_symbols = {
-        str(symbol).upper()
-        for symbol in existing_result.scalars()
-    }
-
-    added: list[str] = []
-    already_exists: list[str] = []
-    unknown: list[str] = []
-
-    for symbol in normalized_symbols:
-
-        if symbol in existing_symbols:
-            already_exists.append(symbol)
-            continue
-
-        instrument = instrument_map.get(
-            symbol
-        )
-
-        if instrument is None:
-            unknown.append(symbol)
-            continue
-
-        session.add(
-            WatchlistItem(
-                symbol=instrument.symbol,
-                name=instrument.name,
-                token=instrument.token,
-                kind=instrument.kind,
-            )
-        )
-
-        added.append(symbol)
-
-    await session.commit()
-
-    return {
-        "requested": len(
-            normalized_symbols
-        ),
-        "added": len(added),
-        "already_exists": len(
-            already_exists
-        ),
-        "unknown": len(unknown),
-        "added_symbols": added,
-        "existing_symbols": (
-            already_exists
-        ),
-        "unknown_symbols": unknown,
-    }
-
-
 @app.post(
     "/api/watchlist",
     response_model=WatchlistOut,
-    dependencies=[Depends(require_owner)],
+    dependencies=[
+        Depends(
+            require_owner
+        )
+    ],
     status_code=201,
 )
 async def add_watchlist(
     payload: WatchlistCreate,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(
+        get_session
+    ),
 ) -> WatchlistOut:
-    symbol = payload.symbol.upper()
+
+    symbol = (
+        payload.symbol
+        .strip()
+        .upper()
+    )
+
+
+    # ==============================================
+    # CHECK EXISTING
+    # ==============================================
 
     existing = (
         await session.execute(
-            select(WatchlistItem).where(
-                WatchlistItem.symbol == symbol
+            select(
+                WatchlistItem
+            ).where(
+                WatchlistItem.symbol ==
+                symbol
             )
         )
     ).scalar_one_or_none()
 
-    if existing:
+
+    if existing is not None:
+
+        # Repair/re-register old database items
+        # with the live tracker as well.
+
+        existing_price = 0.0
+        existing_change = 0.0
+
+        try:
+
+            quote = (
+                await market().quote(
+                    existing.symbol,
+                    existing.token,
+                )
+            )
+
+            existing_price = float(
+                quote.last_price
+            )
+
+            existing_change = float(
+                quote.change_percent or
+                0.0
+            )
+
+        except Exception as exc:
+
+            print(
+                "Existing watchlist "
+                "quote unavailable:",
+                existing.symbol,
+                exc,
+            )
+
+
+        live_market = getattr(
+            app.state,
+            "live_market",
+            None,
+        )
+
+
+        if (
+            live_market is not None
+            and
+            existing.token
+        ):
+
+            try:
+
+                live_market.add_instrument(
+                    symbol=
+                        existing.symbol,
+
+                    token=
+                        existing.token,
+
+                    last_price=(
+                        existing_price
+                        if existing_price > 0
+                        else None
+                    ),
+                )
+
+            except Exception as exc:
+
+                print(
+                    "Unable to restore "
+                    "existing live stock:",
+                    existing.symbol,
+                    exc,
+                )
+
+
         raise HTTPException(
             status_code=409,
-            detail="Symbol is already in the watchlist",
+            detail=(
+                "Symbol is already "
+                "in the watchlist"
+            ),
         )
+
+
+    # ==============================================
+    # SAVE DATABASE ITEM
+    # ==============================================
 
     item = WatchlistItem(
         symbol=symbol,
@@ -1307,21 +1235,129 @@ async def add_watchlist(
         kind=payload.kind,
     )
 
-    session.add(item)
-    await session.commit()
 
-    quote = await market().quote(
-        item.symbol,
-        item.token,
+    session.add(
+        item
     )
 
+    await session.commit()
+
+
+    # ==============================================
+    # QUOTE
+    #
+    # IMPORTANT:
+    # Failure to get a quote must NOT undo or
+    # break a valid Watchlist addition.
+    # ==============================================
+
+    last_price = 0.0
+    change_percent = 0.0
+
+
+    try:
+
+        quote = (
+            await market().quote(
+                item.symbol,
+                item.token,
+            )
+        )
+
+        last_price = float(
+            quote.last_price
+        )
+
+        change_percent = float(
+            quote.change_percent or
+            0.0
+        )
+
+
+    except Exception as exc:
+
+        print(
+            "Watchlist quote "
+            "temporarily unavailable:",
+            item.symbol,
+            exc,
+        )
+
+
+    # ==============================================
+    # ADD TO LIVE MARKET TRACKER
+    # ==============================================
+
+    live_market = getattr(
+        app.state,
+        "live_market",
+        None,
+    )
+
+
+    if (
+        live_market is not None
+        and
+        item.token
+    ):
+
+        try:
+
+            live_market.add_instrument(
+                symbol=
+                    item.symbol,
+
+                token=
+                    item.token,
+
+                last_price=(
+                    last_price
+                    if last_price > 0
+                    else None
+                ),
+            )
+
+
+            print(
+                "WATCHLIST LIVE ADDED:",
+                item.symbol,
+                item.token,
+            )
+
+
+        except Exception as exc:
+
+            print(
+                "Unable to add "
+                "watchlist stock "
+                "to live tracker:",
+                item.symbol,
+                exc,
+            )
+
+
+    # ==============================================
+    # RESPONSE
+    # ==============================================
+
     return WatchlistOut(
-        symbol=item.symbol,
-        name=item.name,
-        token=item.token,
-        kind=item.kind,
-        last_price=quote.last_price,
-        change_percent=quote.change_percent,
+        symbol=
+            item.symbol,
+
+        name=
+            item.name,
+
+        token=
+            item.token,
+
+        kind=
+            item.kind,
+
+        last_price=
+            last_price,
+
+        change_percent=
+            change_percent,
     )
 
 
@@ -1805,6 +1841,36 @@ async def delete_alert(
     await session.delete(alert)
     await session.commit()
 
+@app.get(
+    "/api/watchlist/symbols",
+    dependencies=[
+        Depends(
+            require_owner
+        )
+    ],
+)
+async def get_watchlist_symbols(
+    session: AsyncSession = Depends(
+        get_session
+    ),
+) -> list[str]:
+
+    result = await session.execute(
+        select(
+            WatchlistItem.symbol
+        ).order_by(
+            WatchlistItem.symbol
+        )
+    )
+
+    return [
+        str(symbol)
+        .strip()
+        .upper()
+
+        for symbol
+        in result.scalars()
+    ]
 
 @app.get(
     "/api/scanner/watchlist",
@@ -1937,19 +2003,39 @@ async def scan_stock(
 @app.get(
     "/api/v2/scanner/{symbol}",
     response_model=ScannerV2Out,
-    dependencies=[Depends(require_owner)],
+    dependencies=[
+        Depends(
+            require_owner
+        )
+    ],
 )
 async def scan_stock_v2(
     symbol: str,
     interval: str = "5m",
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(
+        get_session
+    ),
 ) -> ScannerV2Out:
-    """V2 single-stock scanner using the modular response builder."""
+
+    """
+    V2 single-stock scanner.
+
+    Candle priority:
+
+    1. Fresh market candles
+    2. Permanent SQLite history
+    3. Angel One historical fallback
+
+    Scanner requires at least
+    30 candles.
+    """
+
     if interval not in {
         "1m",
         "5m",
         "15m",
     }:
+
         raise HTTPException(
             status_code=422,
             detail=(
@@ -1958,40 +2044,332 @@ async def scan_stock_v2(
             ),
         )
 
-    instrument = await resolve_instrument(
-        session,
-        symbol,
+
+    symbol_upper = (
+        symbol
+        .strip()
+        .upper()
     )
 
-    try:
-        candles = await market().candles(
-            instrument.symbol,
-            interval,
-            instrument.token,
+
+    instrument = (
+        await resolve_instrument(
+            session,
+            symbol_upper,
         )
+    )
+
+
+    try:
+
+        # ==========================================
+        # 1. LOAD PERMANENT STORED CANDLES
+        # ==========================================
+
+        stored_candles = (
+            await load_candles(
+                session,
+                symbol=instrument.symbol,
+                interval=interval,
+                limit=200,
+            )
+        )
+
+
+        # ==========================================
+        # 2. TRY FRESH MARKET CANDLES
+        # ==========================================
+
+        fresh_candles = []
+
+
+        try:
+
+            fresh_candles = (
+                await market()
+                .candles(
+                    instrument.symbol,
+                    interval,
+                    instrument.token,
+                )
+            )
+
+        except Exception as exc:
+
+            print(
+                "Scanner live candle read failed:",
+                instrument.symbol,
+                interval,
+                exc,
+            )
+
+
+        # ==========================================
+        # 3. MERGE STORED + FRESH
+        # ==========================================
+
+        candle_map = {}
+
+
+        for candle in stored_candles:
+
+            candle_time = (
+                candle.get(
+                    "time"
+                )
+            )
+
+
+            if (
+                candle_time
+                is not None
+            ):
+
+                candle_map[
+                    int(
+                        float(
+                            candle_time
+                        )
+                    )
+                ] = candle
+
+
+        for candle in fresh_candles:
+
+            candle_time = (
+                candle.get(
+                    "time"
+                )
+            )
+
+
+            if (
+                candle_time
+                is not None
+            ):
+
+                candle_map[
+                    int(
+                        float(
+                            candle_time
+                        )
+                    )
+                ] = candle
+
+
+        candles = sorted(
+            candle_map.values(),
+            key=lambda item:
+                float(
+                    item.get(
+                        "time",
+                        0,
+                    )
+                ),
+        )
+
+
+        candles = (
+            candles[
+                -200:
+            ]
+        )
+
+
+        # ==========================================
+        # 4. HISTORICAL FALLBACK
+        # ==========================================
+
+        if (
+            len(candles) <
+            30
+        ):
+
+            days_map = {
+                "1m": 5,
+                "5m": 10,
+                "15m": 20,
+            }
+
+
+            days_to_fetch = (
+                days_map[
+                    interval
+                ]
+            )
+
+
+            print(
+                "Scanner historical fallback:",
+                instrument.symbol,
+                interval,
+                days_to_fetch,
+                "days",
+            )
+
+
+            historical = (
+                await market()
+                .historical_candles(
+                    instrument.symbol,
+                    interval,
+                    instrument.token,
+                    days=days_to_fetch,
+                )
+            )
+
+
+            if historical:
+
+                # Save permanently so
+                # future scans do not
+                # need another full fetch.
+
+                await save_candles(
+                    session,
+                    symbol=instrument.symbol,
+                    interval=interval,
+                    candles=historical,
+                )
+
+
+                stored_candles = (
+                    await load_candles(
+                        session,
+                        symbol=instrument.symbol,
+                        interval=interval,
+                        limit=200,
+                    )
+                )
+
+
+                candle_map = {}
+
+
+                for candle in stored_candles:
+
+                    candle_time = (
+                        candle.get(
+                            "time"
+                        )
+                    )
+
+
+                    if (
+                        candle_time
+                        is not None
+                    ):
+
+                        candle_map[
+                            int(
+                                float(
+                                    candle_time
+                                )
+                            )
+                        ] = candle
+
+
+                for candle in fresh_candles:
+
+                    candle_time = (
+                        candle.get(
+                            "time"
+                        )
+                    )
+
+
+                    if (
+                        candle_time
+                        is not None
+                    ):
+
+                        candle_map[
+                            int(
+                                float(
+                                    candle_time
+                                )
+                            )
+                        ] = candle
+
+
+                candles = sorted(
+                    candle_map.values(),
+                    key=lambda item:
+                        float(
+                            item.get(
+                                "time",
+                                0,
+                            )
+                        ),
+                )
+
+
+                candles = (
+                    candles[
+                        -200:
+                    ]
+                )
+
+
+        # ==========================================
+        # 5. VALIDATE
+        # ==========================================
+
+        if (
+            len(candles) <
+            30
+        ):
+
+            raise ValueError(
+                (
+                    "Not enough candles "
+                    f"for {instrument.symbol} "
+                    f"{interval}; "
+                    f"received "
+                    f"{len(candles)}"
+                )
+            )
+
+
+        # ==========================================
+        # 6. RUN AI SCANNER
+        # ==========================================
 
         result = scan_symbol(
-            symbol=instrument.symbol,
-            candles=candles,
+            symbol=
+                instrument.symbol,
+
+            candles=
+                candles,
         )
 
-        return build_scanner_v2_response(
-            result=result,
-            interval=interval,
+
+        return (
+            build_scanner_v2_response(
+                result=result,
+                interval=interval,
+            )
         )
+
 
     except ValueError as exc:
+
         raise HTTPException(
             status_code=422,
-            detail=str(exc),
+            detail=str(
+                exc
+            ),
         ) from exc
 
+
     except Exception as exc:
+
         raise HTTPException(
             status_code=502,
             detail=(
-                f"V2 scanner failed for "
-                f"{symbol.upper()}: {exc}"
+                "V2 scanner failed for "
+                f"{symbol_upper}: "
+                f"{exc}"
             ),
         ) from exc
 

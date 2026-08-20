@@ -120,6 +120,162 @@ class LiveMarketTracker:
             token_symbol.keys()
         )
 
+
+    def add_instrument(
+        self,
+        symbol: str,
+        token: str,
+        last_price: Optional[
+            float
+        ] = None,
+    ) -> None:
+
+        normalized_symbol = (
+            str(symbol)
+            .strip()
+            .upper()
+        )
+
+        normalized_token = (
+            str(token)
+            .strip()
+        )
+
+        if (
+            not normalized_symbol
+            or
+            not normalized_token
+        ):
+            return
+
+
+        with self._lock:
+
+            already_subscribed = (
+                normalized_token
+                in self._tokens
+            )
+
+            self._token_symbol[
+                normalized_token
+            ] = normalized_symbol
+
+
+            if (
+                not already_subscribed
+            ):
+                self._tokens.append(
+                    normalized_token
+                )
+
+
+            if (
+                last_price
+                is not None
+            ):
+
+                previous = (
+                    self._latest.get(
+                        normalized_symbol,
+                        {},
+                    )
+                )
+
+                self._latest[
+                    normalized_symbol
+                ] = {
+                    "symbol":
+                        normalized_symbol,
+
+                    "token":
+                        normalized_token,
+
+                    "ltp":
+                        float(
+                            last_price
+                        ),
+
+                    "exchange_timestamp":
+                        previous.get(
+                            "exchange_timestamp"
+                        ),
+
+                    "volume":
+                        previous.get(
+                            "volume"
+                        ),
+
+                    "received_at":
+                        datetime.now(
+                            timezone.utc
+                        ).isoformat(),
+                }
+
+
+        if (
+            already_subscribed
+            or
+            not self._running
+            or
+            self._socket
+            is None
+        ):
+            return
+
+
+        try:
+
+            token_list = [
+                {
+                    "exchangeType": 1,
+                    "tokens": [
+                        normalized_token
+                    ],
+                }
+            ]
+
+
+            correlation_id = (
+                f"add{normalized_token}"
+            )[:10]
+
+
+            self._socket.subscribe(
+                correlation_id,
+                2,
+                token_list,
+            )
+
+
+            print(
+                "LIVE MARKET ADDED:",
+                normalized_symbol,
+                normalized_token,
+            )
+
+
+        except Exception as exc:
+
+            print(
+                "LIVE MARKET ADD FAILED:",
+                normalized_symbol,
+                exc,
+            )
+
+
+    def add_listener(
+        self,
+        callback: Callable[
+            [dict[str, Any]],
+            None,
+        ],
+    ) -> None:
+
+        if callback not in self._listeners:
+            self._listeners.append(
+                callback
+            )
+            
     def add_listener(
         self,
         callback: Callable[

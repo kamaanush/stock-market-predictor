@@ -6,6 +6,11 @@ import {
   useState,
 } from "react";
 
+
+// ==================================================
+// TYPES
+// ==================================================
+
 type RadarInstrument = {
   exchange: string;
   symbol: string;
@@ -13,6 +18,7 @@ type RadarInstrument = {
   token: string;
   kind: string;
 };
+
 
 type InstrumentPage = {
   items: RadarInstrument[];
@@ -22,11 +28,13 @@ type InstrumentPage = {
   pages: number;
 };
 
+
 type LiveStock = {
   symbol: string;
   ltp: number;
   volume?: number | null;
 };
+
 
 type RadarScanner = {
   symbol: string;
@@ -43,11 +51,13 @@ type RadarScanner = {
   };
 };
 
+
 type RadarTab =
   | "opportunities"
-  | "volume"
   | "movers"
+  | "volume"
   | "all";
+
 
 type Props = {
   apiBase: string;
@@ -70,19 +80,28 @@ type Props = {
     | Promise<void>;
 };
 
+
+// ==================================================
+// HELPERS
+// ==================================================
+
 function formatPrice(
   value:
     | number
     | null
     | undefined
 ) {
+
   if (
     value === null ||
     value === undefined ||
-    !Number.isFinite(value)
+    !Number.isFinite(
+      value
+    )
   ) {
     return "—";
   }
+
 
   return `₹${value.toLocaleString(
     "en-IN",
@@ -93,74 +112,115 @@ function formatPrice(
   )}`;
 }
 
+
 function formatVolume(
   value:
     | number
     | null
     | undefined
 ) {
+
   if (
     value === null ||
     value === undefined ||
-    !Number.isFinite(value)
+    !Number.isFinite(
+      value
+    )
   ) {
     return "—";
   }
 
-  if (
-    value >= 10_000_000
-  ) {
-    return `${(
-      value / 10_000_000
-    ).toFixed(2)}Cr`;
-  }
 
   if (
-    value >= 100_000
+    value >=
+    10_000_000
   ) {
+
     return `${(
-      value / 100_000
-    ).toFixed(2)}L`;
+      value /
+      10_000_000
+    ).toFixed(
+      2
+    )}Cr`;
+
   }
 
+
   if (
-    value >= 1_000
+    value >=
+    100_000
   ) {
+
     return `${(
-      value / 1_000
-    ).toFixed(1)}K`;
+      value /
+      100_000
+    ).toFixed(
+      2
+    )}L`;
+
   }
+
+
+  if (
+    value >=
+    1_000
+  ) {
+
+    return `${(
+      value /
+      1_000
+    ).toFixed(
+      1
+    )}K`;
+
+  }
+
 
   return String(
-    Math.round(value)
+    Math.round(
+      value
+    )
   );
 }
+
 
 function signalClass(
   signal: string
 ) {
+
   const normalized =
-    signal.toUpperCase();
+    signal
+      .trim()
+      .toUpperCase();
+
 
   if (
-    normalized === "BUY"
+    normalized ===
+    "BUY"
   ) {
+
     return (
       "border-emerald-500/30 " +
       "bg-emerald-500/10 " +
       "text-emerald-300"
     );
+
   }
 
+
   if (
-    normalized === "SELL"
+    normalized ===
+    "SELL"
   ) {
+
     return (
       "border-red-500/30 " +
       "bg-red-500/10 " +
       "text-red-300"
     );
+
   }
+
 
   return (
     "border-amber-500/30 " +
@@ -168,6 +228,11 @@ function signalClass(
     "text-amber-200"
   );
 }
+
+
+// ==================================================
+// COMPONENT
+// ==================================================
 
 export default function MarketRadarPanel({
   apiBase,
@@ -177,6 +242,11 @@ export default function MarketRadarPanel({
   onAddToWatchlist,
 }: Props) {
 
+
+  // ==================================================
+  // STATE
+  // ==================================================
+
   const [
     activeTab,
     setActiveTab,
@@ -185,13 +255,24 @@ export default function MarketRadarPanel({
       "opportunities"
     );
 
+
   const [
     instruments,
     setInstruments,
   ] =
-    useState<RadarInstrument[]>(
+    useState<
+      RadarInstrument[]
+    >([]);
+
+
+  const [
+    trackedSymbols,
+    setTrackedSymbols,
+  ] =
+    useState<string[]>(
       []
     );
+
 
   const [
     search,
@@ -199,11 +280,13 @@ export default function MarketRadarPanel({
   ] =
     useState("");
 
+
   const [
     page,
     setPage,
   ] =
     useState(1);
+
 
   const [
     total,
@@ -211,11 +294,13 @@ export default function MarketRadarPanel({
   ] =
     useState(0);
 
+
   const [
     pages,
     setPages,
   ] =
     useState(1);
+
 
   const [
     loading,
@@ -223,11 +308,13 @@ export default function MarketRadarPanel({
   ] =
     useState(false);
 
+
   const [
     message,
     setMessage,
   ] =
     useState("");
+
 
   const [
     addingSymbol,
@@ -235,35 +322,77 @@ export default function MarketRadarPanel({
   ] =
     useState("");
 
-  const pageSize = 50;
+
+  const pageSize =
+    50;
+
+
+  // ==================================================
+  // TRACKED STOCK LOOKUP
+  // ==================================================
+
+  const trackedSet =
+    useMemo(
+      () =>
+        new Set(
+          trackedSymbols.map(
+            (
+              symbol
+            ) =>
+              symbol
+                .trim()
+                .toUpperCase()
+          )
+        ),
+      [
+        trackedSymbols,
+      ]
+    );
+
+
+  // ==================================================
+  // LIVE STOCK LOOKUP
+  // ==================================================
 
   const liveBySymbol =
     useMemo(
       () => {
+
         const map =
           new Map<
             string,
             LiveStock
           >();
 
+
         liveStocks.forEach(
           (
             stock
           ) => {
+
             map.set(
               stock.symbol
+                .trim()
                 .toUpperCase(),
               stock
             );
+
           }
         );
 
+
         return map;
+
       },
       [
         liveStocks,
       ]
     );
+
+
+  // ==================================================
+  // TOP OPPORTUNITIES
+  // ==================================================
 
   const opportunities =
     useMemo(
@@ -292,10 +421,17 @@ export default function MarketRadarPanel({
       ]
     );
 
+
+  // ==================================================
+  // LIVE VOLUME LEADERS
+  // ==================================================
+
   const volumeLeaders =
     useMemo(
       () =>
-        [...liveStocks]
+        [
+          ...liveStocks,
+        ]
           .filter(
             (
               item
@@ -303,7 +439,7 @@ export default function MarketRadarPanel({
               typeof (
                 item.volume
               ) ===
-                "number"
+              "number"
           )
           .sort(
             (
@@ -329,18 +465,154 @@ export default function MarketRadarPanel({
       ]
     );
 
+
+  // ==================================================
+  // LOAD WATCHLIST SYMBOLS
+  // ==================================================
+
   useEffect(
     () => {
 
       if (
         activeTab !==
-          "all"
+        "all"
       ) {
         return;
       }
 
+
       let active =
         true;
+
+
+      async function loadTrackedSymbols() {
+
+        try {
+
+          const response =
+            await fetch(
+              `${apiBase}/api/watchlist/symbols`,
+              {
+                credentials:
+                  "include",
+
+                cache:
+                  "no-store",
+              }
+            );
+
+
+          if (
+            !response.ok
+          ) {
+
+            throw new Error(
+              "Unable to load tracked symbols"
+            );
+
+          }
+
+
+          const data:
+            string[] =
+            await response
+              .json();
+
+
+          if (
+            !active
+          ) {
+            return;
+          }
+
+
+          setTrackedSymbols(
+            data.map(
+              (
+                symbol
+              ) =>
+                symbol
+                  .trim()
+                  .toUpperCase()
+            )
+          );
+
+
+        } catch (
+          error
+        ) {
+
+          if (
+            !active
+          ) {
+            return;
+          }
+
+
+          console.error(
+            "Market Radar watchlist lookup failed",
+            error
+          );
+
+        }
+
+      }
+
+
+      void loadTrackedSymbols();
+
+
+      return () => {
+
+        active =
+          false;
+
+      };
+
+    },
+    [
+      activeTab,
+      apiBase,
+    ]
+  );
+
+
+  // ==================================================
+  // RESET PAGE WHEN SEARCH CHANGES
+  // ==================================================
+
+  useEffect(
+    () => {
+
+      setPage(
+        1
+      );
+
+    },
+    [
+      search,
+    ]
+  );
+
+
+  // ==================================================
+  // LOAD NSE UNIVERSE
+  // ==================================================
+
+  useEffect(
+    () => {
+
+      if (
+        activeTab !==
+        "all"
+      ) {
+        return;
+      }
+
+
+      let active =
+        true;
+
 
       const timer =
         window.setTimeout(
@@ -353,6 +625,7 @@ export default function MarketRadarPanel({
             setMessage(
               ""
             );
+
 
             try {
 
@@ -374,16 +647,23 @@ export default function MarketRadarPanel({
                   }
                 );
 
-              if (
+
+              const normalizedSearch =
                 search
-                  .trim()
+                  .trim();
+
+
+              if (
+                normalizedSearch
               ) {
+
                 params.set(
                   "q",
-                  search
-                    .trim()
+                  normalizedSearch
                 );
+
               }
+
 
               const response =
                 await fetch(
@@ -391,23 +671,35 @@ export default function MarketRadarPanel({
                   {
                     credentials:
                       "include",
+
                     cache:
                       "no-store",
                   }
                 );
 
+
               if (
                 !response.ok
               ) {
+
+                const body =
+                  await response
+                    .text();
+
+
                 throw new Error(
-                  await response.text()
+                  body ||
+                  "Unable to load NSE instruments"
                 );
+
               }
+
 
               const data:
                 InstrumentPage =
                 await response
                   .json();
+
 
               if (
                 !active
@@ -415,13 +707,16 @@ export default function MarketRadarPanel({
                 return;
               }
 
+
               setInstruments(
                 data.items
               );
 
+
               setTotal(
                 data.total
               );
+
 
               setPages(
                 Math.max(
@@ -429,6 +724,7 @@ export default function MarketRadarPanel({
                   data.pages
                 )
               );
+
 
             } catch (
               error
@@ -440,25 +736,32 @@ export default function MarketRadarPanel({
                 return;
               }
 
+
               setMessage(
                 error instanceof
                   Error
+
                   ? error.message
-                  : "Unable to load instruments"
+
+                  : "Unable to load NSE instruments"
               );
+
 
               setInstruments(
                 []
               );
+
 
             } finally {
 
               if (
                 active
               ) {
+
                 setLoading(
                   false
                 );
+
               }
 
             }
@@ -467,14 +770,17 @@ export default function MarketRadarPanel({
           250
         );
 
+
       return () => {
+
         active =
           false;
 
-        window
-          .clearTimeout(
-            timer
-          );
+
+        window.clearTimeout(
+          timer
+        );
+
       };
 
     },
@@ -486,31 +792,85 @@ export default function MarketRadarPanel({
     ]
   );
 
-  useEffect(
-    () => {
-      setPage(
-        1
-      );
-    },
-    [
-      search,
-    ]
-  );
+
+  // ==================================================
+  // ADD STOCK TO WATCHLIST
+  // ==================================================
 
   async function addStock(
     item:
       RadarInstrument
   ) {
 
+    const normalized =
+      item.symbol
+        .trim()
+        .toUpperCase();
+
+
+    if (
+      trackedSet.has(
+        normalized
+      )
+    ) {
+      return;
+    }
+
+
     setAddingSymbol(
       item.symbol
     );
+
 
     try {
 
       await onAddToWatchlist(
         item
       );
+
+
+      setTrackedSymbols(
+        (
+          current
+        ) => {
+
+          const exists =
+            current.some(
+              (
+                symbol
+              ) =>
+                symbol
+                  .trim()
+                  .toUpperCase() ===
+                normalized
+            );
+
+
+          if (
+            exists
+          ) {
+            return current;
+          }
+
+
+          return [
+            ...current,
+            normalized,
+          ];
+
+        }
+      );
+
+
+    } catch (
+      error
+    ) {
+
+      console.error(
+        `Could not add ${item.symbol} to watchlist`,
+        error
+      );
+
 
     } finally {
 
@@ -519,9 +879,49 @@ export default function MarketRadarPanel({
       );
 
     }
+
   }
 
+
+  // ==================================================
+  // TABS
+  // ==================================================
+
+  const tabs:
+    Array<[
+      RadarTab,
+      string
+    ]> = [
+
+      [
+        "opportunities",
+        "TOP OPPORTUNITIES",
+      ],
+
+      [
+        "movers",
+        "TOP MOVERS",
+      ],
+
+      [
+        "volume",
+        "LIVE VOLUME",
+      ],
+
+      [
+        "all",
+        "NSE UNIVERSE",
+      ],
+
+    ];
+
+
+  // ==================================================
+  // RENDER
+  // ==================================================
+
   return (
+
     <section
       className="
         min-w-0
@@ -529,7 +929,10 @@ export default function MarketRadarPanel({
       "
     >
 
-      {/* HEADER */}
+
+      {/* ==================================================
+          HEADER
+      ================================================== */}
 
       <div
         className="
@@ -560,6 +963,7 @@ export default function MarketRadarPanel({
             NEXUS MARKET INTELLIGENCE
           </div>
 
+
           <h2
             className="
               mt-2
@@ -571,6 +975,7 @@ export default function MarketRadarPanel({
             Market Radar
           </h2>
 
+
           <p
             className="
               mt-1
@@ -578,12 +983,13 @@ export default function MarketRadarPanel({
               text-slate-400
             "
           >
-            Discover signals,
-            live activity and
-            NSE instruments.
+            Discover stocks,
+            analyze tracked opportunities
+            and monitor live NSE activity.
           </p>
 
         </div>
+
 
         <div
           className="
@@ -603,8 +1009,16 @@ export default function MarketRadarPanel({
               text-slate-500
             "
           >
-            NSE INSTRUMENTS
+            {
+              activeTab ===
+              "all"
+
+                ? "NSE UNIVERSE"
+
+                : "MARKET STATUS"
+            }
           </div>
+
 
           <div
             className="
@@ -616,10 +1030,12 @@ export default function MarketRadarPanel({
           >
             {
               activeTab ===
-                "all"
+              "all"
+
                 ? total.toLocaleString(
                     "en-IN"
                   )
+
                 : "LIVE"
             }
           </div>
@@ -629,7 +1045,9 @@ export default function MarketRadarPanel({
       </div>
 
 
-      {/* TABS */}
+      {/* ==================================================
+          TABS
+      ================================================== */}
 
       <div
         className="
@@ -639,106 +1057,476 @@ export default function MarketRadarPanel({
         "
       >
 
-        {(
-          [
-            [
-              "opportunities",
-              "TOP OPPORTUNITIES",
-            ],
+        {
+          tabs.map(
+            (
+              [
+                key,
+                label,
+              ]
+            ) => (
 
-            [
-              "volume",
-              "LIVE VOLUME",
-            ],
-
-            [
-              "movers",
-              "MOVERS",
-            ],
-
-            [
-              "all",
-              "ALL STOCKS",
-            ],
-          ] as [
-            RadarTab,
-            string
-          ][]
-        ).map(
-          (
-            [
-              key,
-              label,
-            ]
-          ) => (
-
-            <button
-              key={
-                key
-              }
-              type="button"
-              onClick={
-                () =>
-                  setActiveTab(
-                    key
-                  )
-              }
-              className={`
-                rounded-lg
-                border
-                px-4
-                py-2
-                text-xs
-                font-semibold
-                tracking-wide
-                transition
-                ${
-                  activeTab ===
+              <button
+                key={
                   key
-                    ? "border-emerald-500 bg-emerald-500/10 text-emerald-300"
-                    : "border-slate-800 bg-[#08120c] text-slate-400 hover:border-emerald-900 hover:text-white"
                 }
-              `}
-            >
-              {
-                label
-              }
-            </button>
 
+                type="button"
+
+                onClick={
+                  () =>
+                    setActiveTab(
+                      key
+                    )
+                }
+
+                className={`
+                  rounded-lg
+                  border
+                  px-4
+                  py-2
+                  text-xs
+                  font-semibold
+                  tracking-wide
+                  transition
+
+                  ${
+                    activeTab ===
+                    key
+
+                      ? "border-emerald-500 bg-emerald-500/10 text-emerald-300"
+
+                      : "border-slate-800 bg-[#08120c] text-slate-400 hover:border-emerald-900 hover:text-white"
+                  }
+                `}
+              >
+                {
+                  label
+                }
+              </button>
+
+            )
           )
-        )}
+        }
 
       </div>
 
 
-      {/* TOP OPPORTUNITIES */}
+      {/* ==================================================
+          TOP OPPORTUNITIES
+      ================================================== */}
 
-      {activeTab ===
+      {
+        activeTab ===
         "opportunities" && (
-
-        <div
-          className="
-            overflow-hidden
-            rounded-xl
-            border
-            border-slate-800
-            bg-[#07100b]
-          "
-        >
 
           <div
             className="
-              flex
-              items-center
-              justify-between
-              border-b
+              overflow-hidden
+              rounded-xl
+              border
               border-slate-800
-              px-5
-              py-4
+              bg-[#07100b]
             "
           >
 
-            <div>
+            <div
+              className="
+                flex
+                items-center
+                justify-between
+                border-b
+                border-slate-800
+                px-5
+                py-4
+              "
+            >
+
+              <div>
+
+                <div
+                  className="
+                    text-sm
+                    font-semibold
+                    text-white
+                  "
+                >
+                  Top Opportunities
+                </div>
+
+
+                <div
+                  className="
+                    mt-1
+                    text-xs
+                    text-slate-500
+                  "
+                >
+                  Ranked from AI Scanner
+                  results for your tracked
+                  stocks.
+                </div>
+
+              </div>
+
+
+              <span
+                className="
+                  text-xs
+                  text-slate-500
+                "
+              >
+                {
+                  opportunities.length
+                } scanned
+              </span>
+
+            </div>
+
+
+            {
+              opportunities.length ===
+              0 ? (
+
+                <div
+                  className="
+                    px-5
+                    py-16
+                    text-center
+                    text-sm
+                    text-slate-500
+                  "
+                >
+                  No scanner results
+                  available yet.
+                </div>
+
+              ) : (
+
+                <div
+                  className="
+                    overflow-x-auto
+                  "
+                >
+
+                  <table
+                    className="
+                      w-full
+                      min-w-[760px]
+                      text-left
+                      text-sm
+                    "
+                  >
+
+                    <thead>
+
+                      <tr
+                        className="
+                          border-b
+                          border-slate-800
+                          text-[10px]
+                          uppercase
+                          tracking-[0.14em]
+                          text-slate-500
+                        "
+                      >
+
+                        <th className="px-5 py-3">
+                          Symbol
+                        </th>
+
+                        <th className="px-5 py-3">
+                          Price
+                        </th>
+
+                        <th className="px-5 py-3">
+                          Signal
+                        </th>
+
+                        <th className="px-5 py-3">
+                          Confidence
+                        </th>
+
+                        <th className="px-5 py-3">
+                          Trend
+                        </th>
+
+                        <th className="px-5 py-3">
+                          Score
+                        </th>
+
+                      </tr>
+
+                    </thead>
+
+
+                    <tbody>
+
+                      {
+                        opportunities.map(
+                          (
+                            scanner
+                          ) => {
+
+                            const symbol =
+                              scanner.symbol
+                                .trim()
+                                .toUpperCase();
+
+
+                            const live =
+                              liveBySymbol.get(
+                                symbol
+                              );
+
+
+                            const price =
+                              live
+                                ?.ltp ??
+                              scanner
+                                .execution
+                                ?.last_price;
+
+
+                            const confidence =
+                              scanner
+                                .analysis
+                                ?.confidence;
+
+
+                            return (
+
+                              <tr
+                                key={
+                                  symbol
+                                }
+
+                                onClick={
+                                  () =>
+                                    onOpenStock(
+                                      symbol
+                                    )
+                                }
+
+                                className="
+                                  cursor-pointer
+                                  border-b
+                                  border-slate-900
+                                  transition
+                                  hover:bg-emerald-950/20
+                                "
+                              >
+
+                                <td
+                                  className="
+                                    px-5
+                                    py-4
+                                    font-semibold
+                                    text-white
+                                  "
+                                >
+                                  {
+                                    symbol
+                                  }
+                                </td>
+
+
+                                <td
+                                  className="
+                                    px-5
+                                    py-4
+                                    text-slate-300
+                                  "
+                                >
+                                  {
+                                    formatPrice(
+                                      price
+                                    )
+                                  }
+                                </td>
+
+
+                                <td
+                                  className="
+                                    px-5
+                                    py-4
+                                  "
+                                >
+
+                                  <span
+                                    className={`
+                                      inline-flex
+                                      rounded-md
+                                      border
+                                      px-2.5
+                                      py-1
+                                      text-xs
+                                      font-semibold
+
+                                      ${
+                                        signalClass(
+                                          scanner.signal
+                                        )
+                                      }
+                                    `}
+                                  >
+                                    {
+                                      scanner.signal
+                                    }
+                                  </span>
+
+                                </td>
+
+
+                                <td
+                                  className="
+                                    px-5
+                                    py-4
+                                    text-slate-300
+                                  "
+                                >
+                                  {
+                                    typeof confidence ===
+                                    "number"
+
+                                      ? `${confidence}%`
+
+                                      : "—"
+                                  }
+                                </td>
+
+
+                                <td
+                                  className="
+                                    px-5
+                                    py-4
+                                    text-slate-300
+                                  "
+                                >
+                                  {
+                                    scanner.trend ||
+                                    "—"
+                                  }
+                                </td>
+
+
+                                <td
+                                  className="
+                                    px-5
+                                    py-4
+                                    font-semibold
+                                    text-cyan-300
+                                  "
+                                >
+                                  {
+                                    scanner.score ??
+                                    "—"
+                                  }
+                                </td>
+
+                              </tr>
+
+                            );
+
+                          }
+                        )
+                      }
+
+                    </tbody>
+
+                  </table>
+
+                </div>
+
+              )
+            }
+
+          </div>
+
+        )
+      }
+
+
+      {/* ==================================================
+          TOP MOVERS
+      ================================================== */}
+
+      {
+        activeTab ===
+        "movers" && (
+
+          <div
+            className="
+              rounded-xl
+              border
+              border-slate-800
+              bg-[#07100b]
+              px-6
+              py-16
+              text-center
+            "
+          >
+
+            <div
+              className="
+                text-lg
+                font-semibold
+                text-white
+              "
+            >
+              Top Movers
+            </div>
+
+
+            <div
+              className="
+                mx-auto
+                mt-3
+                max-w-xl
+                text-sm
+                leading-6
+                text-slate-500
+              "
+            >
+              Real gainers and losers
+              require previous-close data.
+              We will connect this only
+              when genuine market change
+              percentage is available.
+            </div>
+
+          </div>
+
+        )
+      }
+
+
+      {/* ==================================================
+          LIVE VOLUME
+      ================================================== */}
+
+      {
+        activeTab ===
+        "volume" && (
+
+          <div
+            className="
+              overflow-hidden
+              rounded-xl
+              border
+              border-slate-800
+              bg-[#07100b]
+            "
+          >
+
+            <div
+              className="
+                border-b
+                border-slate-800
+                px-5
+                py-4
+              "
+            >
 
               <div
                 className="
@@ -747,8 +1535,9 @@ export default function MarketRadarPanel({
                   text-white
                 "
               >
-                Top Opportunities
+                Live Volume
               </div>
+
 
               <div
                 className="
@@ -757,744 +1546,819 @@ export default function MarketRadarPanel({
                   text-slate-500
                 "
               >
-                Ranked from
-                scanner results
-                already available
-                in NEXUS.
+                Tracked stocks ranked
+                by current live market
+                volume.
               </div>
 
             </div>
 
-            <span
-              className="
-                text-xs
-                text-slate-500
-              "
-            >
-              {
-                opportunities
-                  .length
-              } scanned
-            </span>
 
-          </div>
+            {
+              volumeLeaders.length ===
+              0 ? (
 
-          {opportunities
-            .length === 0 ? (
+                <div
+                  className="
+                    px-5
+                    py-16
+                    text-center
+                    text-sm
+                    text-slate-500
+                  "
+                >
+                  Waiting for live
+                  volume data.
+                </div>
 
-            <div
-              className="
-                px-5
-                py-16
-                text-center
-                text-sm
-                text-slate-500
-              "
-            >
-              No scanner
-              opportunities are
-              available yet.
-            </div>
+              ) : (
 
-          ) : (
+                <div
+                  className="
+                    overflow-x-auto
+                  "
+                >
 
-            <div
-              className="
-                overflow-x-auto
-              "
-            >
-
-              <table
-                className="
-                  w-full
-                  min-w-[760px]
-                  text-left
-                  text-sm
-                "
-              >
-
-                <thead>
-
-                  <tr
+                  <table
                     className="
-                      border-b
-                      border-slate-800
-                      text-[10px]
-                      uppercase
-                      tracking-[0.14em]
-                      text-slate-500
+                      w-full
+                      min-w-[620px]
+                      text-left
+                      text-sm
                     "
                   >
 
-                    <th
-                      className="
-                        px-5
-                        py-3
-                      "
-                    >
-                      Symbol
-                    </th>
+                    <thead>
 
-                    <th
-                      className="
-                        px-5
-                        py-3
-                      "
-                    >
-                      Price
-                    </th>
+                      <tr
+                        className="
+                          border-b
+                          border-slate-800
+                          text-[10px]
+                          uppercase
+                          tracking-[0.14em]
+                          text-slate-500
+                        "
+                      >
 
-                    <th
-                      className="
-                        px-5
-                        py-3
-                      "
-                    >
-                      Signal
-                    </th>
+                        <th className="px-5 py-3">
+                          Rank
+                        </th>
 
-                    <th
-                      className="
-                        px-5
-                        py-3
-                      "
-                    >
-                      Confidence
-                    </th>
+                        <th className="px-5 py-3">
+                          Symbol
+                        </th>
 
-                    <th
-                      className="
-                        px-5
-                        py-3
-                      "
-                    >
-                      Trend
-                    </th>
+                        <th className="px-5 py-3">
+                          Price
+                        </th>
 
-                    <th
-                      className="
-                        px-5
-                        py-3
-                      "
-                    >
-                      Score
-                    </th>
+                        <th className="px-5 py-3">
+                          Volume
+                        </th>
 
-                    <th
-                      className="
-                        px-5
-                        py-3
-                      "
-                    >
-                      Action
-                    </th>
+                        <th className="px-5 py-3">
+                          Signal
+                        </th>
 
-                  </tr>
+                      </tr>
 
-                </thead>
+                    </thead>
 
-                <tbody>
 
-                  {opportunities
-                    .map(
-                      (
-                        scanner
-                      ) => {
+                    <tbody>
 
-                        const live =
-                          liveBySymbol
-                            .get(
-                              scanner.symbol
-                                .toUpperCase()
+                      {
+                        volumeLeaders.map(
+                          (
+                            item,
+                            index
+                          ) => {
+
+                            const symbol =
+                              item.symbol
+                                .trim()
+                                .toUpperCase();
+
+
+                            const scanner =
+                              scanners[
+                                symbol
+                              ];
+
+
+                            return (
+
+                              <tr
+                                key={
+                                  symbol
+                                }
+
+                                onClick={
+                                  () =>
+                                    onOpenStock(
+                                      symbol
+                                    )
+                                }
+
+                                className="
+                                  cursor-pointer
+                                  border-b
+                                  border-slate-900
+                                  transition
+                                  hover:bg-emerald-950/20
+                                "
+                              >
+
+                                <td
+                                  className="
+                                    px-5
+                                    py-4
+                                    text-slate-500
+                                  "
+                                >
+                                  #
+                                  {
+                                    index +
+                                    1
+                                  }
+                                </td>
+
+
+                                <td
+                                  className="
+                                    px-5
+                                    py-4
+                                    font-semibold
+                                    text-white
+                                  "
+                                >
+                                  {
+                                    symbol
+                                  }
+                                </td>
+
+
+                                <td
+                                  className="
+                                    px-5
+                                    py-4
+                                    text-slate-300
+                                  "
+                                >
+                                  {
+                                    formatPrice(
+                                      item.ltp
+                                    )
+                                  }
+                                </td>
+
+
+                                <td
+                                  className="
+                                    px-5
+                                    py-4
+                                    font-semibold
+                                    text-cyan-300
+                                  "
+                                >
+                                  {
+                                    formatVolume(
+                                      item.volume
+                                    )
+                                  }
+                                </td>
+
+
+                                <td
+                                  className="
+                                    px-5
+                                    py-4
+                                  "
+                                >
+
+                                  {
+                                    scanner ? (
+
+                                      <span
+                                        className={`
+                                          inline-flex
+                                          rounded-md
+                                          border
+                                          px-2.5
+                                          py-1
+                                          text-xs
+                                          font-semibold
+
+                                          ${
+                                            signalClass(
+                                              scanner.signal
+                                            )
+                                          }
+                                        `}
+                                      >
+                                        {
+                                          scanner.signal
+                                        }
+                                      </span>
+
+                                    ) : (
+
+                                      <span
+                                        className="
+                                          text-slate-600
+                                        "
+                                      >
+                                        —
+                                      </span>
+
+                                    )
+                                  }
+
+                                </td>
+
+                              </tr>
+
                             );
 
-                        const price =
-                          live
-                            ?.ltp ??
-                          scanner
-                            .execution
-                            ?.last_price;
+                          }
+                        )
+                      }
 
-                        const confidence =
-                          scanner
-                            .analysis
-                            ?.confidence;
+                    </tbody>
 
-                        return (
+                  </table>
 
-                          <tr
-                            key={
-                              scanner.symbol
-                            }
-                            className="
-                              border-b
-                              border-slate-900
-                              transition
-                              hover:bg-emerald-950/10
-                            "
-                          >
+                </div>
 
-                            <td
-                              className="
-                                px-5
-                                py-4
-                              "
-                            >
+              )
+            }
 
-                              <button
-                                type="button"
+          </div>
+
+        )
+      }
+
+
+      {/* ==================================================
+          NSE UNIVERSE
+      ================================================== */}
+
+      {
+        activeTab ===
+        "all" && (
+
+          <div
+            className="
+              overflow-hidden
+              rounded-xl
+              border
+              border-slate-800
+              bg-[#07100b]
+            "
+          >
+
+            {/* UNIVERSE HEADER */}
+
+            <div
+              className="
+                flex
+                flex-col
+                gap-4
+                border-b
+                border-slate-800
+                px-5
+                py-4
+                lg:flex-row
+                lg:items-center
+                lg:justify-between
+              "
+            >
+
+              <div>
+
+                <div
+                  className="
+                    text-sm
+                    font-semibold
+                    text-white
+                  "
+                >
+                  NSE Universe
+                </div>
+
+
+                <div
+                  className="
+                    mt-1
+                    text-xs
+                    text-slate-500
+                  "
+                >
+                  Search any NSE company.
+                  Track only stocks you
+                  want NEXUS to monitor
+                  and scan.
+                </div>
+
+              </div>
+
+
+              <div
+                className="
+                  flex
+                  items-center
+                  gap-3
+                "
+              >
+
+                <input
+                  value={
+                    search
+                  }
+
+                  onChange={
+                    (
+                      event
+                    ) =>
+                      setSearch(
+                        event.target.value
+                      )
+                  }
+
+                  placeholder="Search symbol or company"
+
+                  className="
+                    min-w-[260px]
+                    rounded-lg
+                    border
+                    border-slate-800
+                    bg-[#040b07]
+                    px-4
+                    py-2.5
+                    text-sm
+                    text-white
+                    outline-none
+                    transition
+                    placeholder:text-slate-600
+                    focus:border-emerald-700
+                  "
+                />
+
+              </div>
+
+            </div>
+
+
+            {/* MESSAGE */}
+
+            {
+              message && (
+
+                <div
+                  className="
+                    border-b
+                    border-red-950
+                    bg-red-950/20
+                    px-5
+                    py-3
+                    text-xs
+                    text-red-300
+                  "
+                >
+                  {
+                    message
+                  }
+                </div>
+
+              )
+            }
+
+
+            {/* LOADING */}
+
+            {
+              loading ? (
+
+                <div
+                  className="
+                    px-5
+                    py-16
+                    text-center
+                    text-sm
+                    text-slate-500
+                  "
+                >
+                  Loading NSE
+                  instruments...
+                </div>
+
+              ) : (
+
+                <div
+                  className="
+                    overflow-x-auto
+                  "
+                >
+
+                  <table
+                    className="
+                      w-full
+                      min-w-[820px]
+                      text-left
+                      text-sm
+                    "
+                  >
+
+                    <thead>
+
+                      <tr
+                        className="
+                          border-b
+                          border-slate-800
+                          text-[10px]
+                          uppercase
+                          tracking-[0.14em]
+                          text-slate-500
+                        "
+                      >
+
+                        <th className="px-5 py-3">
+                          Symbol
+                        </th>
+
+                        <th className="px-5 py-3">
+                          Company
+                        </th>
+
+                        <th className="px-5 py-3">
+                          Status
+                        </th>
+
+                        <th className="px-5 py-3">
+                          Signal
+                        </th>
+
+                        <th className="px-5 py-3">
+                          Action
+                        </th>
+
+                      </tr>
+
+                    </thead>
+
+
+                    <tbody>
+
+                      {
+                        instruments.map(
+                          (
+                            item
+                          ) => {
+
+                            const symbol =
+                              item.symbol
+                                .trim()
+                                .toUpperCase();
+
+
+                            const tracked =
+                              trackedSet.has(
+                                symbol
+                              );
+
+
+                            const scanner =
+                              scanners[
+                                symbol
+                              ];
+
+
+                            return (
+
+                              <tr
+                                key={`${item.exchange}-${item.token}-${item.symbol}`}
+
                                 onClick={
                                   () =>
                                     onOpenStock(
-                                      scanner.symbol
+                                      symbol
                                     )
                                 }
+
                                 className="
-                                  font-semibold
-                                  text-white
-                                  hover:text-emerald-300
+                                  cursor-pointer
+                                  border-b
+                                  border-slate-900
+                                  transition
+                                  hover:bg-emerald-950/20
                                 "
                               >
-                                {
-                                  scanner.symbol
-                                }
-                              </button>
 
-                            </td>
+                                {/* SYMBOL */}
 
-                            <td
-                              className="
-                                px-5
-                                py-4
-                                font-medium
-                                text-slate-200
-                              "
-                            >
-                              {
-                                formatPrice(
-                                  price
-                                )
-                              }
-                            </td>
+                                <td
+                                  className="
+                                    px-5
+                                    py-4
+                                  "
+                                >
 
-                            <td
-                              className="
-                                px-5
-                                py-4
-                              "
-                            >
+                                  <span
+                                    className="
+                                      font-semibold
+                                      text-white
+                                    "
+                                  >
+                                    {
+                                      symbol
+                                    }
+                                  </span>
 
-                              <span
-                                className={`
-                                  inline-flex
-                                  rounded-md
-                                  border
-                                  px-2.5
-                                  py-1
-                                  text-xs
-                                  font-semibold
-                                  ${signalClass(
-                                    scanner.signal
-                                  )}
-                                `}
-                              >
-                                {
-                                  scanner
-                                    .signal
-                                }
-                              </span>
+                                </td>
 
-                            </td>
 
-                            <td
-                              className="
-                                px-5
-                                py-4
-                                text-slate-300
-                              "
-                            >
-                              {
-                                typeof confidence ===
-                                "number"
-                                  ? `${confidence}%`
-                                  : "—"
-                              }
-                            </td>
+                                {/* COMPANY */}
 
-                            <td
-                              className="
-                                px-5
-                                py-4
-                                text-slate-300
-                              "
-                            >
-                              {
-                                scanner.trend ||
-                                "—"
-                              }
-                            </td>
+                                <td
+                                  className="
+                                    max-w-[340px]
+                                    px-5
+                                    py-4
+                                    text-slate-400
+                                  "
+                                >
+                                  {
+                                    item.name ||
+                                    "—"
+                                  }
+                                </td>
 
-                            <td
-                              className="
-                                px-5
-                                py-4
-                                font-semibold
-                                text-emerald-300
-                              "
-                            >
-                              {
-                                scanner.score
-                              }
-                            </td>
 
-                            <td
-                              className="
-                                px-5
-                                py-4
-                              "
-                            >
+                                {/* STATUS */}
 
-                              <button
-                                type="button"
-                                onClick={
-                                  () =>
-                                    onOpenStock(
-                                      scanner.symbol
+                                <td
+                                  className="
+                                    px-5
+                                    py-4
+                                  "
+                                >
+
+                                  {
+                                    tracked ? (
+
+                                      <span
+                                        className="
+                                          inline-flex
+                                          rounded-md
+                                          border
+                                          border-emerald-500/30
+                                          bg-emerald-500/10
+                                          px-2.5
+                                          py-1
+                                          text-[10px]
+                                          font-semibold
+                                          tracking-wide
+                                          text-emerald-300
+                                        "
+                                      >
+                                        TRACKED
+                                      </span>
+
+                                    ) : (
+
+                                      <span
+                                        className="
+                                          inline-flex
+                                          rounded-md
+                                          border
+                                          border-slate-700
+                                          bg-slate-900/30
+                                          px-2.5
+                                          py-1
+                                          text-[10px]
+                                          font-semibold
+                                          tracking-wide
+                                          text-slate-500
+                                        "
+                                      >
+                                        NOT TRACKED
+                                      </span>
+
                                     )
-                                }
-                                className="
-                                  rounded-md
-                                  border
-                                  border-emerald-900
-                                  px-3
-                                  py-1.5
-                                  text-xs
-                                  font-semibold
-                                  text-emerald-300
-                                  hover:border-emerald-500
-                                  hover:bg-emerald-500/10
-                                "
-                              >
-                                OPEN CHART
-                              </button>
+                                  }
 
+                                </td>
+
+
+                                {/* SIGNAL */}
+
+                                <td
+                                  className="
+                                    px-5
+                                    py-4
+                                  "
+                                >
+
+                                  {
+                                    scanner ? (
+
+                                      <span
+                                        className={`
+                                          inline-flex
+                                          rounded-md
+                                          border
+                                          px-2.5
+                                          py-1
+                                          text-xs
+                                          font-semibold
+
+                                          ${
+                                            signalClass(
+                                              scanner.signal
+                                            )
+                                          }
+                                        `}
+                                      >
+                                        {
+                                          scanner.signal
+                                        }
+                                      </span>
+
+                                    ) : tracked ? (
+
+                                      <span
+                                        className="
+                                          text-xs
+                                          font-semibold
+                                          text-cyan-400
+                                        "
+                                      >
+                                        PENDING
+                                      </span>
+
+                                    ) : (
+
+                                      <span
+                                        className="
+                                          text-slate-600
+                                        "
+                                      >
+                                        —
+                                      </span>
+
+                                    )
+                                  }
+
+                                </td>
+
+
+                                {/* ACTION */}
+
+                                <td
+                                  className="
+                                    px-5
+                                    py-4
+                                  "
+                                >
+
+                                  {
+                                    tracked ? (
+
+                                      <span
+                                        className="
+                                          text-xs
+                                          font-semibold
+                                          text-emerald-400
+                                        "
+                                      >
+                                        ✓ TRACKED
+                                      </span>
+
+                                    ) : (
+
+                                      <button
+                                        type="button"
+
+                                        disabled={
+                                          addingSymbol ===
+                                          item.symbol
+                                        }
+
+                                        onClick={
+                                          (
+                                            event
+                                          ) => {
+
+                                            event
+                                              .stopPropagation();
+
+
+                                            void addStock(
+                                              item
+                                            );
+
+                                          }
+                                        }
+
+                                        className="
+                                          rounded-md
+                                          border
+                                          border-slate-700
+                                          px-3
+                                          py-1.5
+                                          text-xs
+                                          font-semibold
+                                          text-slate-300
+                                          transition
+                                          hover:border-emerald-500
+                                          hover:bg-emerald-500/10
+                                          hover:text-emerald-300
+                                          disabled:cursor-not-allowed
+                                          disabled:opacity-40
+                                        "
+                                      >
+                                        {
+                                          addingSymbol ===
+                                          item.symbol
+
+                                            ? "ADDING..."
+
+                                            : "+ WATCH"
+                                        }
+                                      </button>
+
+                                    )
+                                  }
+
+                                </td>
+
+                              </tr>
+
+                            );
+
+                          }
+                        )
+                      }
+
+
+                      {
+                        instruments.length ===
+                        0 && (
+
+                          <tr>
+
+                            <td
+                              colSpan={
+                                5
+                              }
+
+                              className="
+                                px-5
+                                py-16
+                                text-center
+                                text-sm
+                                text-slate-500
+                              "
+                            >
+                              No NSE stocks
+                              found.
                             </td>
 
                           </tr>
 
-                        );
-
+                        )
                       }
-                    )}
 
-                </tbody>
+                    </tbody>
 
-              </table>
+                  </table>
 
-            </div>
+                </div>
 
-          )}
-
-        </div>
-
-      )}
+              )
+            }
 
 
-      {/* LIVE VOLUME */}
-
-      {activeTab ===
-        "volume" && (
-
-        <div
-          className="
-            overflow-hidden
-            rounded-xl
-            border
-            border-slate-800
-            bg-[#07100b]
-          "
-        >
-
-          <div
-            className="
-              border-b
-              border-slate-800
-              px-5
-              py-4
-            "
-          >
+            {/* PAGINATION */}
 
             <div
               className="
-                text-sm
-                font-semibold
-                text-white
-              "
-            >
-              Highest Live Volume
-            </div>
-
-            <div
-              className="
-                mt-1
-                text-xs
-                text-slate-500
-              "
-            >
-              Uses only real
-              live volume currently
-              available to the app.
-            </div>
-
-          </div>
-
-          {volumeLeaders
-            .length === 0 ? (
-
-            <div
-              className="
+                flex
+                flex-col
+                gap-3
+                border-t
+                border-slate-800
                 px-5
-                py-16
-                text-center
-                text-sm
-                text-slate-500
-              "
-            >
-              Live volume data is
-              not available yet.
-            </div>
-
-          ) : (
-
-            <div
-              className="
-                overflow-x-auto
+                py-4
+                sm:flex-row
+                sm:items-center
+                sm:justify-between
               "
             >
 
-              <table
-                className="
-                  w-full
-                  min-w-[620px]
-                  text-left
-                  text-sm
-                "
-              >
-
-                <thead>
-
-                  <tr
-                    className="
-                      border-b
-                      border-slate-800
-                      text-[10px]
-                      uppercase
-                      tracking-[0.14em]
-                      text-slate-500
-                    "
-                  >
-
-                    <th
-                      className="
-                        px-5
-                        py-3
-                      "
-                    >
-                      Rank
-                    </th>
-
-                    <th
-                      className="
-                        px-5
-                        py-3
-                      "
-                    >
-                      Symbol
-                    </th>
-
-                    <th
-                      className="
-                        px-5
-                        py-3
-                      "
-                    >
-                      LTP
-                    </th>
-
-                    <th
-                      className="
-                        px-5
-                        py-3
-                      "
-                    >
-                      Volume
-                    </th>
-
-                    <th
-                      className="
-                        px-5
-                        py-3
-                      "
-                    >
-                      Chart
-                    </th>
-
-                  </tr>
-
-                </thead>
-
-                <tbody>
-
-                  {volumeLeaders
-                    .map(
-                      (
-                        item,
-                        index
-                      ) => (
-
-                        <tr
-                          key={
-                            item.symbol
-                          }
-                          className="
-                            border-b
-                            border-slate-900
-                            hover:bg-emerald-950/10
-                          "
-                        >
-
-                          <td
-                            className="
-                              px-5
-                              py-4
-                              text-slate-500
-                            "
-                          >
-                            #
-                            {
-                              index +
-                              1
-                            }
-                          </td>
-
-                          <td
-                            className="
-                              px-5
-                              py-4
-                            "
-                          >
-
-                            <button
-                              type="button"
-                              onClick={
-                                () =>
-                                  onOpenStock(
-                                    item.symbol
-                                  )
-                              }
-                              className="
-                                font-semibold
-                                text-white
-                                hover:text-emerald-300
-                              "
-                            >
-                              {
-                                item.symbol
-                              }
-                            </button>
-
-                          </td>
-
-                          <td
-                            className="
-                              px-5
-                              py-4
-                              text-slate-200
-                            "
-                          >
-                            {
-                              formatPrice(
-                                item.ltp
-                              )
-                            }
-                          </td>
-
-                          <td
-                            className="
-                              px-5
-                              py-4
-                              font-semibold
-                              text-emerald-300
-                            "
-                          >
-                            {
-                              formatVolume(
-                                item.volume
-                              )
-                            }
-                          </td>
-
-                          <td
-                            className="
-                              px-5
-                              py-4
-                            "
-                          >
-
-                            <button
-                              type="button"
-                              onClick={
-                                () =>
-                                  onOpenStock(
-                                    item.symbol
-                                  )
-                              }
-                              className="
-                                text-xs
-                                font-semibold
-                                text-emerald-300
-                                hover:text-emerald-200
-                              "
-                            >
-                              OPEN →
-                            </button>
-
-                          </td>
-
-                        </tr>
-
-                      )
-                    )}
-
-                </tbody>
-
-              </table>
-
-            </div>
-
-          )}
-
-        </div>
-
-      )}
-
-
-      {/* MOVERS */}
-
-      {activeTab ===
-        "movers" && (
-
-        <div
-          className="
-            rounded-xl
-            border
-            border-slate-800
-            bg-[#07100b]
-            px-6
-            py-16
-            text-center
-          "
-        >
-
-          <div
-            className="
-              mx-auto
-              flex
-              h-12
-              w-12
-              items-center
-              justify-center
-              rounded-full
-              border
-              border-emerald-900
-              bg-emerald-950/20
-              text-xl
-              text-emerald-300
-            "
-          >
-            ↕
-          </div>
-
-          <h3
-            className="
-              mt-4
-              text-base
-              font-semibold
-              text-white
-            "
-          >
-            Market Movers
-          </h3>
-
-          <p
-            className="
-              mx-auto
-              mt-2
-              max-w-lg
-              text-sm
-              leading-6
-              text-slate-500
-            "
-          >
-            Top gainers and
-            losers will appear
-            here after we add
-            reliable previous-close
-            data to the live feed.
-            NEXUS will not fabricate
-            change percentages.
-          </p>
-
-        </div>
-
-      )}
-
-
-      {/* ALL STOCKS */}
-
-      {activeTab ===
-        "all" && (
-
-        <div
-          className="
-            overflow-hidden
-            rounded-xl
-            border
-            border-slate-800
-            bg-[#07100b]
-          "
-        >
-
-          <div
-            className="
-              flex
-              flex-col
-              gap-4
-              border-b
-              border-slate-800
-              px-5
-              py-4
-              md:flex-row
-              md:items-center
-              md:justify-between
-            "
-          >
-
-            <div>
-
               <div
                 className="
-                  text-sm
-                  font-semibold
-                  text-white
-                "
-              >
-                All NSE Stocks
-              </div>
-
-              <div
-                className="
-                  mt-1
                   text-xs
                   text-slate-500
                 "
@@ -1503,529 +2367,120 @@ export default function MarketRadarPanel({
                   total.toLocaleString(
                     "en-IN"
                   )
-                } instruments
+                } NSE equity instruments
+              </div>
+
+
+              <div
+                className="
+                  flex
+                  items-center
+                  gap-3
+                "
+              >
+
+                <button
+                  type="button"
+
+                  disabled={
+                    page <=
+                    1
+                  }
+
+                  onClick={
+                    () =>
+                      setPage(
+                        (
+                          current
+                        ) =>
+                          Math.max(
+                            1,
+                            current -
+                            1
+                          )
+                      )
+                  }
+
+                  className="
+                    rounded-md
+                    border
+                    border-slate-800
+                    px-3
+                    py-1.5
+                    text-xs
+                    text-slate-300
+                    disabled:cursor-not-allowed
+                    disabled:opacity-30
+                  "
+                >
+                  PREVIOUS
+                </button>
+
+
+                <span
+                  className="
+                    text-xs
+                    text-slate-500
+                  "
+                >
+                  PAGE{" "}
+                  {
+                    page
+                  }{" "}
+                  /{" "}
+                  {
+                    pages
+                  }
+                </span>
+
+
+                <button
+                  type="button"
+
+                  disabled={
+                    page >=
+                    pages
+                  }
+
+                  onClick={
+                    () =>
+                      setPage(
+                        (
+                          current
+                        ) =>
+                          Math.min(
+                            pages,
+                            current +
+                            1
+                          )
+                      )
+                  }
+
+                  className="
+                    rounded-md
+                    border
+                    border-slate-800
+                    px-3
+                    py-1.5
+                    text-xs
+                    text-slate-300
+                    disabled:cursor-not-allowed
+                    disabled:opacity-30
+                  "
+                >
+                  NEXT
+                </button>
+
               </div>
 
             </div>
 
-            <div
-              className="
-                relative
-                w-full
-                md:w-80
-              "
-            >
-
-              <input
-                value={
-                  search
-                }
-                onChange={
-                  (
-                    event
-                  ) =>
-                    setSearch(
-                      event
-                        .target
-                        .value
-                    )
-                }
-                placeholder="Search symbol or company..."
-                className="
-                  w-full
-                  rounded-lg
-                  border
-                  border-slate-800
-                  bg-[#050b07]
-                  px-4
-                  py-2.5
-                  text-sm
-                  text-white
-                  outline-none
-                  placeholder:text-slate-600
-                  focus:border-emerald-600
-                "
-              />
-
-            </div>
-
           </div>
 
-          {message && (
-
-            <div
-              className="
-                border-b
-                border-red-950
-                bg-red-950/20
-                px-5
-                py-3
-                text-sm
-                text-red-300
-              "
-            >
-              {
-                message
-              }
-            </div>
-
-          )}
-
-          {loading ? (
-
-            <div
-              className="
-                flex
-                min-h-[360px]
-                items-center
-                justify-center
-              "
-            >
-
-              <div
-                className="
-                  h-8
-                  w-8
-                  animate-spin
-                  rounded-full
-                  border-2
-                  border-emerald-950
-                  border-r-emerald-400
-                  border-t-emerald-400
-                "
-              />
-
-            </div>
-
-          ) : (
-
-            <div
-              className="
-                overflow-x-auto
-              "
-            >
-
-              <table
-                className="
-                  w-full
-                  min-w-[900px]
-                  text-left
-                  text-sm
-                "
-              >
-
-                <thead>
-
-                  <tr
-                    className="
-                      border-b
-                      border-slate-800
-                      text-[10px]
-                      uppercase
-                      tracking-[0.14em]
-                      text-slate-500
-                    "
-                  >
-
-                    <th
-                      className="
-                        px-5
-                        py-3
-                      "
-                    >
-                      Symbol
-                    </th>
-
-                    <th
-                      className="
-                        px-5
-                        py-3
-                      "
-                    >
-                      Company
-                    </th>
-
-                    <th
-                      className="
-                        px-5
-                        py-3
-                      "
-                    >
-                      Type
-                    </th>
-
-                    <th
-                      className="
-                        px-5
-                        py-3
-                      "
-                    >
-                      LTP
-                    </th>
-
-                    <th
-                      className="
-                        px-5
-                        py-3
-                      "
-                    >
-                      Volume
-                    </th>
-
-                    <th
-                      className="
-                        px-5
-                        py-3
-                      "
-                    >
-                      Watchlist
-                    </th>
-
-                    <th
-                      className="
-                        px-5
-                        py-3
-                      "
-                    >
-                      Chart
-                    </th>
-
-                  </tr>
-
-                </thead>
-
-                <tbody>
-
-                  {instruments
-                    .map(
-                      (
-                        item
-                      ) => {
-
-                        const live =
-                          liveBySymbol
-                            .get(
-                              item.symbol
-                                .toUpperCase()
-                            );
-
-                        return (
-
-                          <tr
-                            key={
-                              item.token
-                            }
-                            className="
-                              border-b
-                              border-slate-900
-                              transition
-                              hover:bg-emerald-950/10
-                            "
-                          >
-
-                            <td
-                              className="
-                                px-5
-                                py-4
-                              "
-                            >
-
-                              <button
-                                type="button"
-                                onClick={
-                                  () =>
-                                    onOpenStock(
-                                      item.symbol
-                                    )
-                                }
-                                className="
-                                  font-semibold
-                                  text-white
-                                  hover:text-emerald-300
-                                "
-                              >
-                                {
-                                  item.symbol
-                                }
-                              </button>
-
-                            </td>
-
-                            <td
-                              className="
-                                max-w-[280px]
-                                truncate
-                                px-5
-                                py-4
-                                text-slate-400
-                              "
-                            >
-                              {
-                                item.name
-                              }
-                            </td>
-
-                            <td
-                              className="
-                                px-5
-                                py-4
-                              "
-                            >
-                              <span
-                                className="
-                                  rounded
-                                  border
-                                  border-slate-800
-                                  bg-slate-900/40
-                                  px-2
-                                  py-1
-                                  text-[10px]
-                                  text-slate-400
-                                "
-                              >
-                                {
-                                  item.kind
-                                }
-                              </span>
-                            </td>
-
-                            <td
-                              className="
-                                px-5
-                                py-4
-                                font-medium
-                                text-slate-200
-                              "
-                            >
-                              {
-                                formatPrice(
-                                  live?.ltp
-                                )
-                              }
-                            </td>
-
-                            <td
-                              className="
-                                px-5
-                                py-4
-                                text-slate-400
-                              "
-                            >
-                              {
-                                formatVolume(
-                                  live
-                                    ?.volume
-                                )
-                              }
-                            </td>
-
-                            <td
-                              className="
-                                px-5
-                                py-4
-                              "
-                            >
-
-                              <button
-                                type="button"
-                                disabled={
-                                  addingSymbol ===
-                                  item.symbol
-                                }
-                                onClick={
-                                  () =>
-                                    void addStock(
-                                      item
-                                    )
-                                }
-                                className="
-                                  rounded-md
-                                  border
-                                  border-slate-700
-                                  px-3
-                                  py-1.5
-                                  text-xs
-                                  font-semibold
-                                  text-slate-300
-                                  hover:border-emerald-600
-                                  hover:text-emerald-300
-                                  disabled:opacity-40
-                                "
-                              >
-                                {
-                                  addingSymbol ===
-                                  item.symbol
-                                    ? "ADDING..."
-                                    : "+ WATCH"
-                                }
-                              </button>
-
-                            </td>
-
-                            <td
-                              className="
-                                px-5
-                                py-4
-                              "
-                            >
-
-                              <button
-                                type="button"
-                                onClick={
-                                  () =>
-                                    onOpenStock(
-                                      item.symbol
-                                    )
-                                }
-                                className="
-                                  rounded-md
-                                  border
-                                  border-emerald-900
-                                  px-3
-                                  py-1.5
-                                  text-xs
-                                  font-semibold
-                                  text-emerald-300
-                                  hover:border-emerald-500
-                                  hover:bg-emerald-500/10
-                                "
-                              >
-                                OPEN
-                              </button>
-
-                            </td>
-
-                          </tr>
-
-                        );
-
-                      }
-                    )}
-
-                </tbody>
-
-              </table>
-
-            </div>
-
-          )}
-
-          <div
-            className="
-              flex
-              flex-col
-              gap-3
-              border-t
-              border-slate-800
-              px-5
-              py-4
-              sm:flex-row
-              sm:items-center
-              sm:justify-between
-            "
-          >
-
-            <div
-              className="
-                text-xs
-                text-slate-500
-              "
-            >
-              Page {
-                page
-              } of {
-                pages
-              }
-            </div>
-
-            <div
-              className="
-                flex
-                gap-2
-              "
-            >
-
-              <button
-                type="button"
-                disabled={
-                  page <= 1 ||
-                  loading
-                }
-                onClick={
-                  () =>
-                    setPage(
-                      (
-                        current
-                      ) =>
-                        Math.max(
-                          1,
-                          current -
-                            1
-                        )
-                    )
-                }
-                className="
-                  rounded-md
-                  border
-                  border-slate-800
-                  px-4
-                  py-2
-                  text-xs
-                  font-semibold
-                  text-slate-400
-                  hover:border-emerald-800
-                  hover:text-white
-                  disabled:opacity-30
-                "
-              >
-                ← PREVIOUS
-              </button>
-
-              <button
-                type="button"
-                disabled={
-                  page >=
-                    pages ||
-                  loading
-                }
-                onClick={
-                  () =>
-                    setPage(
-                      (
-                        current
-                      ) =>
-                        Math.min(
-                          pages,
-                          current +
-                            1
-                        )
-                    )
-                }
-                className="
-                  rounded-md
-                  border
-                  border-slate-800
-                  px-4
-                  py-2
-                  text-xs
-                  font-semibold
-                  text-slate-400
-                  hover:border-emerald-800
-                  hover:text-white
-                  disabled:opacity-30
-                "
-              >
-                NEXT →
-              </button>
-
-            </div>
-
-          </div>
-
-        </div>
-
-      )}
+        )
+      }
 
     </section>
+
   );
 }

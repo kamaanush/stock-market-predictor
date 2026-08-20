@@ -929,21 +929,35 @@ export default function Dashboard() {
                 second.symbol
               )
         ),
-      [stocks]
+      [
+        stocks,
+      ]
     );
 
+
+  // ==================================================
+  // TRACKED SCANNER UNIVERSE
+  // ==================================================
 
   const scannerSymbolsKey =
     useMemo(
       () =>
         sortedStocks
-          .slice(0, 5)
           .map(
-            (stock) =>
+            (
+              stock
+            ) =>
               stock.symbol
+                .trim()
+                .toUpperCase()
+          )
+          .filter(
+            Boolean
           )
           .join(","),
-      [sortedStocks]
+      [
+        sortedStocks,
+      ]
     );
 
 
@@ -951,176 +965,361 @@ export default function Dashboard() {
   // V2 SCANNER
   // ==================================================
 
-  useEffect(() => {
+  useEffect(
+    () => {
 
-    if (
-      !preferencesLoaded ||
-      !scannerSymbolsKey ||
-      authenticated !== true
-    ) {
-      return;
-    }
-
-
-    let active = true;
-
-
-    async function loadScanner() {
-
-      setScannerLoading(
-        true
-      );
-
-
-      const symbols =
-        scannerSymbolsKey
-          .split(",")
-          .filter(Boolean);
-
-
-      const results:
-        PromiseSettledResult<ScannerResult>[] =
-        [];
-
-      for (
-        const symbol of symbols
+      if (
+        !preferencesLoaded ||
+        !scannerSymbolsKey ||
+        authenticated !== true
       ) {
-        try {
-          const response =
-            await fetch(
-              `${API_BASE}/api/v2/scanner/${symbol}?interval=${scannerTimeframe}`,
-              {
-                credentials:
-                  "include",
-              }
-            );
 
-          if (
-            response.status ===
-            401
-          ) {
-            throw new Error(
-              "Login required"
-            );
-          }
+        return;
 
-          if (
-            !response.ok
-          ) {
-            const body =
-              await response
-                .json()
-                .catch(
-                  () => ({})
-                );
+      }
 
-            throw new Error(
-              body.detail ||
-              `${symbol}: scanner failed`
-            );
-          }
 
-          const data:
-            ScannerResult =
-            await response.json();
+      let active =
+        true;
 
-          results.push({
-            status:
-              "fulfilled",
-            value:
-              data,
-          });
-        } catch (
-        error
-        ) {
-          console.error(
-            `[NEXUS scanner] ${symbol}`,
-            error
-          );
 
-          results.push({
-            status:
-              "rejected",
-            reason:
-              error,
-          });
-        }
+      let nextScanTimer:
+        number | null =
+        null;
 
-        await new Promise<void>(
+
+      function sleep(
+        milliseconds:
+          number
+      ) {
+
+        return new Promise<void>(
           (
             resolve
           ) => {
+
             window.setTimeout(
               resolve,
-              2500
+              milliseconds
             );
+
           }
         );
+
       }
 
 
-      if (!active) {
-        return;
-      }
+      async function scanUniverse() {
 
 
-      setScanners(
-        (previous) => {
+        const symbols =
+          scannerSymbolsKey
+            .split(",")
+            .map(
+              (
+                symbol
+              ) =>
+                symbol
+                  .trim()
+                  .toUpperCase()
+            )
+            .filter(
+              Boolean
+            );
 
-          const next = {
-            ...previous,
-          };
+
+        if (
+          symbols.length ===
+          0
+        ) {
+
+          return;
+
+        }
 
 
-          results.forEach(
-            (result) => {
+        if (
+          active
+        ) {
+
+          setScannerLoading(
+            true
+          );
+
+        }
+
+
+        try {
+
+
+          for (
+            const symbol
+            of symbols
+          ) {
+
+
+            if (
+              !active
+            ) {
+
+              return;
+
+            }
+
+
+            try {
+
+
+              const response =
+                await fetch(
+                  `${API_BASE}/api/v2/scanner/${encodeURIComponent(
+                    symbol
+                  )}?interval=${scannerTimeframe}`,
+                  {
+
+                    credentials:
+                      "include",
+
+                    cache:
+                      "no-store",
+
+                  }
+                );
+
 
               if (
-                result.status ===
-                "fulfilled"
+                response.status ===
+                401
               ) {
 
-                next[
-                  result.value
-                    .symbol
-                ] =
-                  result.value;
+
+                if (
+                  active
+                ) {
+
+                  setAuthenticated(
+                    false
+                  );
+
+                }
+
+
+                return;
+
               }
+
+
+              if (
+                !response.ok
+              ) {
+
+
+                const body =
+                  await response
+                    .json()
+                    .catch(
+                      () => ({})
+                    );
+
+
+                throw new Error(
+                  body.detail ||
+                  `${symbol}: scanner failed`
+                );
+
+              }
+
+
+              const data:
+                ScannerResult =
+                await response
+                  .json();
+
+
+              if (
+                !active
+              ) {
+
+                return;
+
+              }
+
+
+              setScanners(
+                (
+                  previous
+                ) => ({
+
+                  ...previous,
+
+                  [
+                    data.symbol
+                      .toUpperCase()
+                  ]:
+                    data,
+
+                })
+              );
+
+
+            } catch (
+            error
+            ) {
+
+              const errorMessage =
+                error instanceof Error
+                  ? error.message
+                  : String(
+                    error
+                  );
+
+
+              const isCandleIssue =
+                errorMessage
+                  .toLowerCase()
+                  .includes(
+                    "candle"
+                  );
+
+
+              if (
+                isCandleIssue
+              ) {
+
+                /*
+                 * Insufficient candles are
+                 * not an application crash.
+                 *
+                 * This can happen with
+                 * newly listed, invalid,
+                 * suspended or temporarily
+                 * unavailable instruments.
+                 */
+                console.warn(
+                  `[NEXUS scanner] skipped ${symbol}: ${errorMessage}`
+                );
+
+              } else {
+
+                console.error(
+                  `[NEXUS scanner] ${symbol}`,
+                  error
+                );
+
+              }
+
             }
+
+
+            if (
+              active
+            ) {
+
+              /*
+               * Keep Angel One
+               * scanner requests
+               * spaced apart.
+               */
+              await sleep(
+                2500
+              );
+
+            }
+
+
+          }
+
+
+        } finally {
+
+
+          if (
+            active
+          ) {
+
+            setScannerLoading(
+              false
+            );
+
+          }
+
+
+        }
+
+
+      }
+
+
+      async function runScannerCycle() {
+
+
+        await scanUniverse();
+
+
+        if (
+          !active
+        ) {
+
+          return;
+
+        }
+
+
+        /*
+         * Start another complete
+         * scan after one minute.
+         *
+         * setTimeout is used
+         * instead of setInterval
+         * so scans cannot overlap.
+         */
+        nextScanTimer =
+          window.setTimeout(
+            () => {
+
+              void runScannerCycle();
+
+            },
+            60000
           );
 
 
-          return next;
+      }
+
+
+      void runScannerCycle();
+
+
+      return () => {
+
+
+        active =
+          false;
+
+
+        if (
+          nextScanTimer !==
+          null
+        ) {
+
+          window.clearTimeout(
+            nextScanTimer
+          );
+
         }
-      );
 
 
-      setScannerLoading(
-        false
-      );
-    }
+      };
 
 
-    loadScanner();
-
-
-    // const timer =
-    //   window.setInterval(
-    //     loadScanner,
-    //     60000
-    //   );
-
-
-    return () => {
-      active = false;
-    };
-
-  }, [
-    authenticated,
-    scannerTimeframe,
-    scannerSymbolsKey,
-    preferencesLoaded,
-  ]);
+    },
+    [
+      authenticated,
+      scannerTimeframe,
+      scannerSymbolsKey,
+      preferencesLoaded,
+    ]
+  );
 
 
   // ==================================================
@@ -1755,77 +1954,410 @@ export default function Dashboard() {
   async function addInstrumentToWatchlist(
     item: InstrumentSearchResult
   ) {
-    setWatchlistMessage("");
+
+    setWatchlistMessage(
+      ""
+    );
+
+
+    const symbol =
+      item.symbol
+        .trim()
+        .toUpperCase();
+
 
     try {
-      const response = await fetch(
-        `${API_BASE}/api/watchlist`,
-        {
-          method: "POST",
-          credentials: "include",
-          headers: {
-            "Content-Type":
-              "application/json",
-          },
-          body: JSON.stringify(item),
-        }
-      );
 
-      if (response.status === 409) {
-        setWatchlistMessage(
-          `${item.symbol} is already in the watchlist`
+      const response =
+        await fetch(
+          `${API_BASE}/api/watchlist`,
+          {
+            method:
+              "POST",
+
+            credentials:
+              "include",
+
+            headers: {
+              "Content-Type":
+                "application/json",
+            },
+
+            body:
+              JSON.stringify(
+                item
+              ),
+          }
         );
-        setSelected(item.symbol);
-        setSearchOpen(false);
+
+
+      // ==========================================
+      // ALREADY EXISTS
+      //
+      // Treat this as tracked, not as failure.
+      // Backend also re-registers it with
+      // the live tracker.
+      // ==========================================
+
+      if (
+        response.status ===
+        409
+      ) {
+
+        setWatchlistMessage(
+          `${symbol} is already in the watchlist`
+        );
+
+
+        setStocks(
+          (
+            current
+          ) => {
+
+            const exists =
+              current.some(
+                (
+                  stock
+                ) =>
+                  stock.symbol
+                    .toUpperCase() ===
+                  symbol
+              );
+
+
+            if (
+              exists
+            ) {
+              return current;
+            }
+
+
+            return [
+              ...current,
+              {
+                symbol:
+                  symbol,
+
+                token:
+                  item.token,
+
+                ltp:
+                  0,
+
+                volume:
+                  null,
+
+                received_at:
+                  new Date()
+                    .toISOString(),
+              },
+            ];
+
+          }
+        );
+
+
+        setSelected(
+          symbol
+        );
+
+
+        setSearchQuery(
+          ""
+        );
+
+        setSearchResults(
+          []
+        );
+
+        setSearchOpen(
+          false
+        );
+
+
+        setFullScreenChart(
+          false
+        );
+
+
+        setWsVersion(
+          (
+            current
+          ) =>
+            current + 1
+        );
+
+
+        setActiveView(
+          "watchlist"
+        );
+
+
         return;
+
       }
 
-      if (!response.ok) {
-        const body = await response
-          .json()
-          .catch(() => ({}));
+
+      // ==========================================
+      // REAL ERROR
+      // ==========================================
+
+      if (
+        !response.ok
+      ) {
+
+        const body =
+          await response
+            .json()
+            .catch(
+              () => ({})
+            );
+
 
         throw new Error(
           body.detail ||
           "Could not add stock"
         );
+
       }
 
-      setWatchlistMessage(
-        `${item.symbol} added to watchlist`
+
+      // ==========================================
+      // SUCCESS
+      // ==========================================
+
+      const saved:
+        {
+          symbol: string;
+          name?: string;
+          token?: string;
+          kind?: string;
+          last_price?: number;
+          change_percent?: number;
+        } =
+        await response.json();
+
+
+      const savedSymbol =
+        (
+          saved.symbol ||
+          symbol
+        )
+          .trim()
+          .toUpperCase();
+
+
+      // ==========================================
+      // UPDATE UI IMMEDIATELY
+      // ==========================================
+
+      setStocks(
+        (
+          current
+        ) => {
+
+          const index =
+            current.findIndex(
+              (
+                stock
+              ) =>
+                stock.symbol
+                  .toUpperCase() ===
+                savedSymbol
+            );
+
+
+          const liveStock:
+            LiveStock = {
+
+            symbol:
+              savedSymbol,
+
+            token:
+              saved.token ||
+              item.token,
+
+            ltp:
+              typeof saved.last_price ===
+                "number"
+
+                ? saved.last_price
+
+                : 0,
+
+            volume:
+              null,
+
+            received_at:
+              new Date()
+                .toISOString(),
+          };
+
+
+          if (
+            index ===
+            -1
+          ) {
+
+            return [
+              ...current,
+              liveStock,
+            ];
+
+          }
+
+
+          const next = [
+            ...current,
+          ];
+
+
+          next[
+            index
+          ] = {
+            ...next[
+            index
+            ],
+            ...liveStock,
+          };
+
+
+          return next;
+
+        }
       );
 
-      setSelected(item.symbol);
-      setSearchQuery("");
-      setSearchResults([]);
-      setSearchOpen(false);
-      setActiveView("watchlist");
-    } catch (error) {
+
       setWatchlistMessage(
-        error instanceof Error
-          ? error.message
-          : "Could not add stock"
+        `${savedSymbol} added to watchlist`
       );
+
+
+      setSelected(
+        savedSymbol
+      );
+
+
+      setSearchQuery(
+        ""
+      );
+
+      setSearchResults(
+        []
+      );
+
+      setSearchOpen(
+        false
+      );
+
+
+      setFullScreenChart(
+        false
+      );
+
+
+      // Reconnect so the frontend receives
+      // the newly subscribed SmartAPI stock.
+
+      setWsVersion(
+        (
+          current
+        ) =>
+          current + 1
+      );
+
+
+      // Show Watchlist immediately after ADD.
+
+      setActiveView(
+        "watchlist"
+      );
+
+
+    } catch (
+    error
+    ) {
+
+      const message =
+        error instanceof
+          Error
+
+          ? error.message
+
+          : "Could not add stock";
+
+
+      console.error(
+        "Could not add stock to watchlist:",
+        message
+      );
+
+
+      setWatchlistMessage(
+        message
+      );
+
+
+      // Important:
+      // MarketRadarPanel must know the ADD
+      // really failed, otherwise it may mark
+      // the stock TRACKED incorrectly.
+
+      throw error;
+
     }
+
   }
 
 
   function handleNavigation(
     title: string
   ) {
+
     const map:
-      Record<string, DashboardView> = {
-      OVERVIEW: "overview",
-      "MARKET RADAR": "radar",
-      "AI SCANNER": "scanner",
-      WATCHLIST: "watchlist",
-      PORTFOLIO: "portfolio",
-      BACKTEST: "backtest",
-      SETTINGS: "settings",
+      Record<
+        string,
+        DashboardView
+      > = {
+
+      OVERVIEW:
+        "overview",
+
+      "MARKET RADAR":
+        "radar",
+
+      "AI SCANNER":
+        "scanner",
+
+      WATCHLIST:
+        "watchlist",
+
+      PORTFOLIO:
+        "portfolio",
+
+      BACKTEST:
+        "backtest",
+
+      SETTINGS:
+        "settings",
     };
 
+
+    const nextView =
+      map[
+      title
+      ];
+
+
+    if (
+      !nextView
+    ) {
+      return;
+    }
+
+
     setActiveView(
-      map[title] || "overview"
+      nextView
     );
   }
 
@@ -2531,303 +3063,303 @@ export default function Dashboard() {
     <main className="terminal">
 
 
-    {/* ==========================================
+      {/* ==========================================
         FULL SCREEN STOCK CHART
     ========================================== */}
 
-    {fullScreenChart && (
-
-      <div
-        style={{
-          position: "fixed",
-          inset: 0,
-          zIndex: 99999,
-          display: "flex",
-          flexDirection: "column",
-          background: "#040a06",
-          overflow: "hidden",
-        }}
-      >
+      {fullScreenChart && (
 
         <div
           style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 99999,
             display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: "18px",
-            padding: "14px 20px",
-            borderBottom: "1px solid #163425",
-            background: "#07100b",
-          }}
-        >
-
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "18px",
-            }}
-          >
-
-            <button
-              type="button"
-              onClick={() =>
-                setFullScreenChart(false)
-              }
-              style={{
-                border: "1px solid #24533c",
-                borderRadius: "7px",
-                background: "#0a1710",
-                color: "#9ee6bc",
-                padding: "8px 13px",
-                cursor: "pointer",
-                fontSize: "11px",
-                fontWeight: 700,
-              }}
-            >
-              ← BACK
-            </button>
-
-            <div>
-
-              <div
-                style={{
-                  color: "#5f8370",
-                  fontSize: "9px",
-                  fontWeight: 700,
-                  letterSpacing: ".15em",
-                }}
-              >
-                NSE • LIVE CHART
-              </div>
-
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "baseline",
-                  gap: "10px",
-                  marginTop: "3px",
-                }}
-              >
-
-                <strong
-                  style={{
-                    color: "#ffffff",
-                    fontSize: "22px",
-                  }}
-                >
-                  {selected || "SELECT STOCK"}
-                </strong>
-
-                <span
-                  style={{
-                    color: "#65e39a",
-                    fontSize: "18px",
-                    fontWeight: 700,
-                  }}
-                >
-                  {selectedStock
-                    ? `₹${selectedStock.ltp.toFixed(2)}`
-                    : "—"}
-                </span>
-
-              </div>
-
-            </div>
-
-          </div>
-
-
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "8px",
-              flexWrap: "wrap",
-            }}
-          >
-
-            {(
-              [
-                "15s",
-                "1m",
-                "5m",
-                "15m",
-                "1D",
-                "1W",
-                "1M",
-              ] as ChartTimeframe[]
-            ).map((value) => (
-
-              <button
-                key={value}
-                type="button"
-                onClick={() =>
-                  setTimeframe(value)
-                }
-                style={{
-                  border:
-                    timeframe === value
-                      ? "1px solid #37d67a"
-                      : "1px solid #1a3c2a",
-
-                  borderRadius: "6px",
-
-                  background:
-                    timeframe === value
-                      ? "rgba(55,214,122,.12)"
-                      : "#08120c",
-
-                  color:
-                    timeframe === value
-                      ? "#7df0aa"
-                      : "#728879",
-
-                  padding: "7px 11px",
-                  cursor: "pointer",
-                  fontSize: "10px",
-                  fontWeight: 700,
-                }}
-              >
-                {value}
-              </button>
-
-            ))}
-
-          </div>
-
-        </div>
-
-
-        {selectedScanner && (
-
-          <div
-            style={{
-              display: "flex",
-              alignItems: "center",
-              gap: "16px",
-              padding: "8px 20px",
-              borderBottom: "1px solid #10281b",
-              background: "#050d08",
-              fontSize: "10px",
-              color: "#809487",
-            }}
-          >
-
-            <SignalBadge
-              signal={selectedScanner.signal}
-            />
-
-            <span>
-              TREND{" "}
-              <strong>
-                {selectedScanner.trend}
-              </strong>
-            </span>
-
-            <span>
-              CONFIDENCE{" "}
-              <strong>
-                {
-                  selectedScanner.analysis
-                    .confidence
-                }
-                %
-              </strong>
-            </span>
-
-            <span>
-              GRADE{" "}
-              <strong>
-                {selectedScanner.grade}
-              </strong>
-            </span>
-
-          </div>
-
-        )}
-
-
-        <div
-          style={{
-            flex: 1,
-            minHeight: 0,
-            padding: "10px 18px 0",
+            flexDirection: "column",
+            background: "#040a06",
             overflow: "hidden",
           }}
         >
 
-          {chartLoading ? (
-
-            <StockLoader />
-
-          ) : chartData.length > 0 ? (
-
-            <StockChart
-              data={chartData}
-              interval={timeframe}
-              height={680}
-            />
-
-          ) : (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: "18px",
+              padding: "14px 20px",
+              borderBottom: "1px solid #163425",
+              background: "#07100b",
+            }}
+          >
 
             <div
               style={{
-                height: "100%",
                 display: "flex",
                 alignItems: "center",
-                justifyContent: "center",
-                color: "#63766a",
+                gap: "18px",
               }}
             >
-              No {timeframe} candles available for{" "}
-              {selected}
+
+              <button
+                type="button"
+                onClick={() =>
+                  setFullScreenChart(false)
+                }
+                style={{
+                  border: "1px solid #24533c",
+                  borderRadius: "7px",
+                  background: "#0a1710",
+                  color: "#9ee6bc",
+                  padding: "8px 13px",
+                  cursor: "pointer",
+                  fontSize: "11px",
+                  fontWeight: 700,
+                }}
+              >
+                ← BACK
+              </button>
+
+              <div>
+
+                <div
+                  style={{
+                    color: "#5f8370",
+                    fontSize: "9px",
+                    fontWeight: 700,
+                    letterSpacing: ".15em",
+                  }}
+                >
+                  NSE • LIVE CHART
+                </div>
+
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "baseline",
+                    gap: "10px",
+                    marginTop: "3px",
+                  }}
+                >
+
+                  <strong
+                    style={{
+                      color: "#ffffff",
+                      fontSize: "22px",
+                    }}
+                  >
+                    {selected || "SELECT STOCK"}
+                  </strong>
+
+                  <span
+                    style={{
+                      color: "#65e39a",
+                      fontSize: "18px",
+                      fontWeight: 700,
+                    }}
+                  >
+                    {selectedStock
+                      ? `₹${selectedStock.ltp.toFixed(2)}`
+                      : "—"}
+                  </span>
+
+                </div>
+
+              </div>
+
+            </div>
+
+
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+                flexWrap: "wrap",
+              }}
+            >
+
+              {(
+                [
+                  "15s",
+                  "1m",
+                  "5m",
+                  "15m",
+                  "1D",
+                  "1W",
+                  "1M",
+                ] as ChartTimeframe[]
+              ).map((value) => (
+
+                <button
+                  key={value}
+                  type="button"
+                  onClick={() =>
+                    setTimeframe(value)
+                  }
+                  style={{
+                    border:
+                      timeframe === value
+                        ? "1px solid #37d67a"
+                        : "1px solid #1a3c2a",
+
+                    borderRadius: "6px",
+
+                    background:
+                      timeframe === value
+                        ? "rgba(55,214,122,.12)"
+                        : "#08120c",
+
+                    color:
+                      timeframe === value
+                        ? "#7df0aa"
+                        : "#728879",
+
+                    padding: "7px 11px",
+                    cursor: "pointer",
+                    fontSize: "10px",
+                    fontWeight: 700,
+                  }}
+                >
+                  {value}
+                </button>
+
+              ))}
+
+            </div>
+
+          </div>
+
+
+          {selectedScanner && (
+
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "16px",
+                padding: "8px 20px",
+                borderBottom: "1px solid #10281b",
+                background: "#050d08",
+                fontSize: "10px",
+                color: "#809487",
+              }}
+            >
+
+              <SignalBadge
+                signal={selectedScanner.signal}
+              />
+
+              <span>
+                TREND{" "}
+                <strong>
+                  {selectedScanner.trend}
+                </strong>
+              </span>
+
+              <span>
+                CONFIDENCE{" "}
+                <strong>
+                  {
+                    selectedScanner.analysis
+                      .confidence
+                  }
+                  %
+                </strong>
+              </span>
+
+              <span>
+                GRADE{" "}
+                <strong>
+                  {selectedScanner.grade}
+                </strong>
+              </span>
+
             </div>
 
           )}
 
+
+          <div
+            style={{
+              flex: 1,
+              minHeight: 0,
+              padding: "10px 18px 0",
+              overflow: "hidden",
+            }}
+          >
+
+            {chartLoading ? (
+
+              <StockLoader />
+
+            ) : chartData.length > 0 ? (
+
+              <StockChart
+                data={chartData}
+                interval={timeframe}
+                height={680}
+              />
+
+            ) : (
+
+              <div
+                style={{
+                  height: "100%",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  color: "#63766a",
+                }}
+              >
+                No {timeframe} candles available for{" "}
+                {selected}
+              </div>
+
+            )}
+
+          </div>
+
+
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              padding: "9px 20px",
+              borderTop: "1px solid #163425",
+              background: "#07100b",
+              color: "#667c6e",
+              fontSize: "9px",
+            }}
+          >
+
+            <span>
+              TIMEFRAME{" "}
+              <strong>
+                {timeframe}
+              </strong>
+            </span>
+
+            <span>
+              CANDLES{" "}
+              <strong>
+                {chartData.length}
+              </strong>
+            </span>
+
+            <span>
+              EMA 20
+            </span>
+
+            <span>
+              ESC TO CLOSE
+            </span>
+
+          </div>
+
         </div>
 
-
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            padding: "9px 20px",
-            borderTop: "1px solid #163425",
-            background: "#07100b",
-            color: "#667c6e",
-            fontSize: "9px",
-          }}
-        >
-
-          <span>
-            TIMEFRAME{" "}
-            <strong>
-              {timeframe}
-            </strong>
-          </span>
-
-          <span>
-            CANDLES{" "}
-            <strong>
-              {chartData.length}
-            </strong>
-          </span>
-
-          <span>
-            EMA 20
-          </span>
-
-          <span>
-            ESC TO CLOSE
-          </span>
-
-        </div>
-
-      </div>
-
-    )}
+      )}
 
       {/* =================================================
           SIDEBAR
@@ -2873,14 +3405,27 @@ export default function Dashboard() {
                   string,
                   DashboardView
                 > = {
-                OVERVIEW: "overview",
-                "AI SCANNER": "scanner",
-                WATCHLIST: "watchlist",
-                PORTFOLIO: "portfolio",
-                ALERTS: "alerts",
-                BACKTEST: "backtest",
-                ANALYTICS: "analytics",
-                SETTINGS: "settings",
+
+                OVERVIEW:
+                  "overview",
+
+                "MARKET RADAR":
+                  "radar",
+
+                "AI SCANNER":
+                  "scanner",
+
+                WATCHLIST:
+                  "watchlist",
+
+                PORTFOLIO:
+                  "portfolio",
+
+                BACKTEST:
+                  "backtest",
+
+                SETTINGS:
+                  "settings",
               };
 
               const itemView =
