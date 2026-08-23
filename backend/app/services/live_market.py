@@ -261,19 +261,146 @@ class LiveMarketTracker:
                 normalized_symbol,
                 exc,
             )
-
-
-    def add_listener(
+    def remove_instrument(
         self,
-        callback: Callable[
-            [dict[str, Any]],
-            None,
-        ],
+        symbol: str,
     ) -> None:
 
-        if callback not in self._listeners:
-            self._listeners.append(
-                callback
+        normalized_symbol = (
+            str(symbol)
+            .strip()
+            .upper()
+        )
+
+        if not normalized_symbol:
+            return
+
+
+        token_to_remove: Optional[
+            str
+        ] = None
+
+
+        with self._lock:
+
+            for (
+                token,
+                tracked_symbol,
+            ) in list(
+                self._token_symbol.items()
+            ):
+
+                if (
+                    tracked_symbol ==
+                    normalized_symbol
+                ):
+                    token_to_remove = (
+                        token
+                    )
+                    break
+
+
+            # Remove cached market data
+            # immediately.
+
+            self._latest.pop(
+                normalized_symbol,
+                None,
+            )
+
+
+            if (
+                token_to_remove
+                is None
+            ):
+                return
+
+
+            # Remove the token from our
+            # tracked universe.
+
+            self._token_symbol.pop(
+                token_to_remove,
+                None,
+            )
+
+
+            self._tokens = [
+                token
+                for token
+                in self._tokens
+
+                if token !=
+                token_to_remove
+            ]
+
+
+            socket = (
+                self._socket
+            )
+
+            should_unsubscribe = (
+                self._running
+                and
+                socket is not None
+            )
+
+
+        # If SmartAPI WebSocket is not
+        # currently running, local cleanup
+        # above is enough. The token will not
+        # be subscribed on the next start.
+
+        if (
+            not should_unsubscribe
+            or
+            socket is None
+            or
+            token_to_remove
+            is None
+        ):
+            return
+
+
+        try:
+
+            token_list = [
+                {
+                    "exchangeType":
+                        1,
+
+                    "tokens": [
+                        token_to_remove
+                    ],
+                }
+            ]
+
+
+            correlation_id = (
+                f"del{token_to_remove}"
+            )[:10]
+
+
+            socket.unsubscribe(
+                correlation_id,
+                2,
+                token_list,
+            )
+
+
+            print(
+                "LIVE MARKET REMOVED:",
+                normalized_symbol,
+                token_to_remove,
+            )
+
+
+        except Exception as exc:
+
+            print(
+                "LIVE MARKET REMOVE FAILED:",
+                normalized_symbol,
+                exc,
             )
             
     def add_listener(
@@ -333,10 +460,21 @@ class LiveMarketTracker:
         if not token:
             return
 
-        symbol = self._token_symbol.get(
-            token,
-            token,
-        )
+        with self._lock:
+
+            symbol = (
+                self._token_symbol.get(
+                    token
+                )
+            )
+
+
+        # The token may have just been
+        # removed from the watchlist.
+        # Ignore any delayed SmartAPI ticks.
+
+        if not symbol:
+            return
 
         raw_ltp = message.get(
             "last_traded_price"

@@ -1364,25 +1364,70 @@ async def add_watchlist(
 @app.delete(
     "/api/watchlist/{symbol}",
     status_code=204,
-    dependencies=[Depends(require_owner)],
+    dependencies=[
+        Depends(
+            require_owner
+        )
+    ],
 )
 async def remove_watchlist(
     symbol: str,
-    session: AsyncSession = Depends(get_session),
+    session: AsyncSession = Depends(
+        get_session
+    ),
 ) -> None:
+
+    normalized_symbol = (
+        str(symbol)
+        .strip()
+        .upper()
+    )
+
+
     result = await session.execute(
-        delete(WatchlistItem).where(
-            WatchlistItem.symbol == symbol.upper()
+        delete(
+            WatchlistItem
+        ).where(
+            WatchlistItem.symbol ==
+            normalized_symbol
         )
     )
 
-    if result.rowcount == 0:
+
+    if (
+        result.rowcount == 0
+    ):
         raise HTTPException(
             status_code=404,
-            detail="Watchlist symbol not found",
+            detail=(
+                "Watchlist symbol "
+                "not found"
+            ),
         )
 
+
     await session.commit()
+
+
+    # ==========================================
+    # REMOVE FROM LIVE MARKET TRACKER
+    # ==========================================
+
+    live_tracker = getattr(
+        app.state,
+        "live_market",
+        None,
+    )
+
+
+    if (
+        live_tracker
+        is not None
+    ):
+
+        live_tracker.remove_instrument(
+            normalized_symbol
+        )
 
 
 @app.get(
@@ -1840,37 +1885,6 @@ async def delete_alert(
 
     await session.delete(alert)
     await session.commit()
-
-@app.get(
-    "/api/watchlist/symbols",
-    dependencies=[
-        Depends(
-            require_owner
-        )
-    ],
-)
-async def get_watchlist_symbols(
-    session: AsyncSession = Depends(
-        get_session
-    ),
-) -> list[str]:
-
-    result = await session.execute(
-        select(
-            WatchlistItem.symbol
-        ).order_by(
-            WatchlistItem.symbol
-        )
-    )
-
-    return [
-        str(symbol)
-        .strip()
-        .upper()
-
-        for symbol
-        in result.scalars()
-    ]
 
 @app.get(
     "/api/scanner/watchlist",

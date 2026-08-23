@@ -50,9 +50,21 @@ def test_add_instrument_to_live_tracker():
     )
 
     assert latest is not None
-    assert latest["symbol"] == "SBIN"
-    assert latest["token"] == "3045"
-    assert latest["ltp"] == 812.50
+
+    assert (
+        latest["symbol"]
+        == "SBIN"
+    )
+
+    assert (
+        latest["token"]
+        == "3045"
+    )
+
+    assert (
+        latest["ltp"]
+        == 812.50
+    )
 
     assert "3045" in tracker._tokens
 
@@ -71,6 +83,7 @@ def test_add_instrument_normalizes_symbol():
     )
 
     assert latest is not None
+
     assert (
         latest["symbol"]
         == "ICICIBANK"
@@ -101,4 +114,104 @@ def test_snapshot_is_sorted():
 
     assert symbols == sorted(
         symbols
+    )
+
+
+def test_remove_instrument_from_live_tracker():
+    tracker = make_tracker()
+
+    tracker.add_instrument(
+        symbol="ICICIBANK",
+        token="4963",
+        last_price=1435.25,
+    )
+
+    # Confirm it exists.
+    assert "4963" in tracker._tokens
+
+    assert (
+        tracker._token_symbol["4963"]
+        == "ICICIBANK"
+    )
+
+    assert (
+        tracker.get_latest(
+            "ICICIBANK"
+        )
+        is not None
+    )
+
+    # Remove using lowercase + spaces
+    # to verify normalization.
+    tracker.remove_instrument(
+        "  icicibank  "
+    )
+
+    # Token removed.
+    assert (
+        "4963"
+        not in tracker._tokens
+    )
+
+    # Mapping removed.
+    assert (
+        "4963"
+        not in tracker._token_symbol
+    )
+
+    # Cached live value removed.
+    assert (
+        tracker.get_latest(
+            "ICICIBANK"
+        )
+        is None
+    )
+
+    # Snapshot no longer contains ICICI.
+    symbols = [
+        item["symbol"]
+        for item in tracker.snapshot()
+    ]
+
+    assert (
+        "ICICIBANK"
+        not in symbols
+    )
+
+def test_removed_instrument_ignores_late_tick():
+    tracker = make_tracker()
+
+    tracker.add_instrument(
+        symbol="ICICIBANK",
+        token="4963",
+        last_price=1435.25,
+    )
+
+    tracker.remove_instrument(
+        "ICICIBANK"
+    )
+
+    tracker._handle_data(
+        None,
+        {
+            "token": "4963",
+            "last_traded_price": 143525,
+            "exchange_timestamp": 1234567890,
+            "volume_trade_for_the_day": 2500000,
+        },
+    )
+
+    assert (
+        tracker.get_latest(
+            "ICICIBANK"
+        )
+        is None
+    )
+
+    assert (
+        "ICICIBANK"
+        not in [
+            item["symbol"]
+            for item in tracker.snapshot()
+        ]
     )
