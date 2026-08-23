@@ -41,30 +41,6 @@ describe(
 
               if (
                 url.includes(
-                  "/api/watchlist/symbols"
-                )
-              ) {
-
-                return new Response(
-                  JSON.stringify(
-                    []
-                  ),
-                  {
-                    status:
-                      200,
-
-                    headers: {
-                      "Content-Type":
-                        "application/json",
-                    },
-                  }
-                );
-
-              }
-
-
-              if (
-                url.includes(
                   "/api/instruments?"
                 )
               ) {
@@ -165,19 +141,27 @@ describe(
           vi.fn();
 
 
-        render(
-          <MarketRadarPanel
-            apiBase="http://localhost:8000"
-            liveStocks={[]}
-            scanners={{}}
-            onOpenStock={
-              openStock
-            }
-            onAddToWatchlist={
-              onAdd
-            }
-          />
-        );
+render(
+  <MarketRadarPanel
+    apiBase="http://localhost:8000"
+
+    liveStocks={[]}
+
+    trackedSymbols={[
+      "RELIANCE",
+    ]}
+
+    scanners={{}}
+
+    onOpenStock={
+      openStock
+    }
+
+    onAddToWatchlist={
+      onAdd
+    }
+  />
+);
 
 
         await user.click(

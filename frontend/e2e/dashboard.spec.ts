@@ -371,8 +371,60 @@ function candleResponse(
 test(
   "NEXUS Market Radar to Watchlist workflow",
   async ({
+
     page,
+
   }) => {
+
+    const runtimeErrors: string[] = [];
+
+
+    page.on(
+      "pageerror",
+      (error) => {
+
+        const message =
+          error.stack ||
+          error.message;
+
+        runtimeErrors.push(
+          `[PAGE ERROR]\n${message}`
+        );
+
+        console.error(
+          "\n[PAGE ERROR]\n",
+          message
+        );
+
+      }
+    );
+
+
+    page.on(
+      "console",
+      (message) => {
+
+        if (
+          message.type() ===
+          "error"
+        ) {
+
+          const text =
+            message.text();
+
+          runtimeErrors.push(
+            `[BROWSER ERROR]\n${text}`
+          );
+
+          console.error(
+            "\n[BROWSER ERROR]\n",
+            text
+          );
+
+        }
+
+      }
+    );
 
     // ==================================================
     // FAKE DATABASE STATE
@@ -392,13 +444,18 @@ test(
     // MOCK WEBSOCKET
     // ==================================================
 
+    // ==================================================
+    // MOCK ONLY THE NEXUS MARKET WEBSOCKET
+    // KEEP NEXT.JS HOT-RELOAD WEBSOCKET REAL
+    // ==================================================
+
     await page.addInitScript(
       () => {
 
         const testWindow =
           window as typeof window & {
             __NEXUS_E2E_TRACKED__?:
-              string[];
+            string[];
           };
 
 
@@ -408,36 +465,31 @@ test(
           ];
 
 
-        class MockWebSocket {
+        // Keep the real browser WebSocket.
+        // Next.js uses this for HMR / hot reload.
 
-          static CONNECTING =
-            0;
-
-          static OPEN =
-            1;
-
-          static CLOSING =
-            2;
-
-          static CLOSED =
-            3;
+        const NativeWebSocket =
+          window.WebSocket;
 
 
-          CONNECTING =
-            0;
+        class MockMarketWebSocket
+          extends EventTarget {
 
-          OPEN =
-            1;
+          readonly CONNECTING =
+            NativeWebSocket.CONNECTING;
 
-          CLOSING =
-            2;
+          readonly OPEN =
+            NativeWebSocket.OPEN;
 
-          CLOSED =
-            3;
+          readonly CLOSING =
+            NativeWebSocket.CLOSING;
+
+          readonly CLOSED =
+            NativeWebSocket.CLOSED;
 
 
-          readyState =
-            MockWebSocket.CONNECTING;
+          readyState: number =
+            NativeWebSocket.CONNECTING;
 
 
           url:
@@ -482,6 +534,8 @@ test(
             url: string
           ) {
 
+            super();
+
             this.url =
               url;
 
@@ -490,13 +544,26 @@ test(
               () => {
 
                 this.readyState =
-                  MockWebSocket.OPEN;
+                  NativeWebSocket.OPEN;
 
 
-                this.onopen?.(
+                const openEvent =
                   new Event(
                     "open"
-                  )
+                  );
+
+
+                // Supports:
+                // ws.addEventListener("open", ...)
+                this.dispatchEvent(
+                  openEvent
+                );
+
+
+                // Supports:
+                // ws.onopen = ...
+                this.onopen?.(
+                  openEvent
                 );
 
 
@@ -544,6 +611,7 @@ test(
                                 new Date()
                                   .toISOString(),
                             };
+
                           }
 
 
@@ -573,7 +641,7 @@ test(
                       );
 
 
-                    this.onmessage?.(
+                    const messageEvent =
                       new MessageEvent(
                         "message",
                         {
@@ -598,7 +666,20 @@ test(
                               }
                             ),
                         }
-                      )
+                      );
+
+
+                    // Supports:
+                    // ws.addEventListener("message", ...)
+                    this.dispatchEvent(
+                      messageEvent
+                    );
+
+
+                    // Supports:
+                    // ws.onmessage = ...
+                    this.onmessage?.(
+                      messageEvent
                     );
 
                   },
@@ -608,6 +689,7 @@ test(
               },
               25
             );
+
           }
 
 
@@ -615,18 +697,97 @@ test(
             _data?: string
           ) {
 
-            // No-op for test.
+            // No-op for deterministic E2E test.
 
           }
 
 
           close() {
 
+            if (
+              this.readyState ===
+              NativeWebSocket.CLOSED
+            ) {
+              return;
+            }
+
+
             this.readyState =
-              MockWebSocket.CLOSED;
+              NativeWebSocket.CLOSED;
+
+
+            const closeEvent =
+              new CloseEvent(
+                "close"
+              );
+
+
+            this.dispatchEvent(
+              closeEvent
+            );
+
+
+            this.onclose?.(
+              closeEvent
+            );
 
           }
+
         }
+
+
+        // ==================================================
+        // WEBSOCKET PROXY
+        //
+        // NEXUS market socket -> fake
+        // Next.js HMR socket     -> real browser WebSocket
+        // ==================================================
+
+        const WebSocketProxy =
+          new Proxy(
+            NativeWebSocket,
+            {
+
+              construct(
+                Target,
+                args
+              ) {
+
+                const url =
+                  String(
+                    args[
+                    0
+                    ] ??
+                    ""
+                  );
+
+
+                if (
+                  url.includes(
+                    "/api/ws/market"
+                  )
+                ) {
+
+                  return new MockMarketWebSocket(
+                    url
+                  );
+
+                }
+
+
+                // Everything else,
+                // including Next.js hot reload,
+                // uses the real WebSocket.
+
+                return Reflect.construct(
+                  Target,
+                  args
+                );
+
+              },
+
+            }
+          );
 
 
         Object.defineProperty(
@@ -641,7 +802,8 @@ test(
               true,
 
             value:
-              MockWebSocket,
+              WebSocketProxy,
+
           }
         );
 
@@ -795,38 +957,6 @@ test(
 
 
         // ==================================================
-        // WATCHLIST SYMBOLS
-        // ==================================================
-
-        if (
-          path ===
-          "/api/watchlist/symbols"
-          &&
-          method ===
-          "GET"
-        ) {
-
-          await route.fulfill({
-            status:
-              200,
-
-            contentType:
-              "application/json",
-
-            body:
-              JSON.stringify(
-                Array.from(
-                  trackedSymbols
-                )
-              ),
-          });
-
-
-          return;
-        }
-
-
-        // ==================================================
         // GET WATCHLIST
         // ==================================================
 
@@ -951,7 +1081,7 @@ test(
 
                   last_price:
                     symbol ===
-                    "ICICIBANK"
+                      "ICICIBANK"
                       ? 1435.25
                       : 1385.50,
 
@@ -1045,24 +1175,24 @@ test(
             search
 
               ? universe.filter(
-                  (
-                    item
-                  ) =>
+                (
+                  item
+                ) =>
 
-                    item.symbol
-                      .toUpperCase()
-                      .includes(
-                        search
-                      )
+                  item.symbol
+                    .toUpperCase()
+                    .includes(
+                      search
+                    )
 
-                    ||
+                  ||
 
-                    item.name
-                      .toUpperCase()
-                      .includes(
-                        search
-                      )
-                )
+                  item.name
+                    .toUpperCase()
+                    .includes(
+                      search
+                    )
+              )
 
               : universe;
 
@@ -1203,7 +1333,7 @@ test(
 
           const price =
             symbol ===
-            "ICICIBANK"
+              "ICICIBANK"
               ? 1435.25
               : 1385.50;
 
@@ -1359,22 +1489,22 @@ test(
 
 
     // ==================================================
-    // VERIFY SIDEBAR
+    // WAIT FOR REACT CLIENT TO BE READY
     // ==================================================
 
-    const marketRadarNav =
-      page
-        .locator(
-          "aside.sidebar button.nav-item"
-        )
-        .filter({
-          hasText:
-            "MARKET RADAR",
-        });
-
+    // RELIANCE only appears after our mocked
+    // WebSocket/scanner client effects have executed,
+    // so this is a stronger hydration signal than
+    // simply waiting for DOMContentLoaded.
 
     await expect(
-      marketRadarNav
+      page.getByText(
+        "RELIANCE",
+        {
+          exact:
+            true,
+        }
+      ).first()
     ).toBeVisible({
       timeout:
         15_000,
@@ -1385,9 +1515,62 @@ test(
     // OPEN MARKET RADAR
     // ==================================================
 
+    const marketRadarNav =
+      page.getByRole(
+        "button",
+        {
+          name:
+            /MARKET RADAR/i,
+        }
+      );
+
+
+    await expect(
+      marketRadarNav
+    ).toBeVisible();
+
+
     await marketRadarNav.click();
 
 
+    // Verify navigation state changed first.
+
+    await expect(
+      marketRadarNav
+    ).toHaveClass(
+      /active/,
+      {
+        timeout:
+          10_000,
+      }
+    );
+
+
+    // Then verify Radar content.
+
+    await expect(
+      page.getByText(
+        "NEXUS MARKET INTELLIGENCE",
+        {
+          exact:
+            true,
+        }
+      )
+    ).toBeVisible({
+      timeout:
+        15_000,
+    });
+
+
+
+    expect(
+      runtimeErrors,
+      `Client-side error after opening Market Radar:\n\n${runtimeErrors.join(
+        "\n\n"
+      )}`
+    ).toEqual(
+      []
+    );
     // Verify actual Radar component loaded.
 
     await expect(
@@ -1515,7 +1698,7 @@ test(
         const testWindow =
           window as typeof window & {
             __NEXUS_E2E_TRACKED__?:
-              string[];
+            string[];
           };
 
 
@@ -1762,24 +1945,11 @@ test(
     // OPEN FULLSCREEN CHART
     // ==================================================
 
-    const openChartButton =
-      opportunityRow
-        .getByRole(
-          "button",
-          {
-            name:
-              /OPEN CHART|OPEN/i,
-          }
-        )
-        .last();
+    // The opportunity row itself is clickable.
+    // MarketRadarPanel calls onOpenStock(symbol)
+    // from the <tr> onClick handler.
 
-
-    await expect(
-      openChartButton
-    ).toBeVisible();
-
-
-    await openChartButton.click();
+    await opportunityRow.click();
 
 
     // ==================================================
@@ -1862,7 +2032,9 @@ test(
         "button",
         {
           name:
-            /BACK/i,
+            "← BACK",
+          exact:
+            true,
         }
       );
 
@@ -1882,6 +2054,215 @@ test(
         10_000,
     });
 
+    // ==================================================
+    // OPEN WATCHLIST
+    // ==================================================
+
+    const watchlistNav =
+      page
+        .locator(
+          "aside.sidebar button.nav-item"
+        )
+        .filter({
+          hasText:
+            "WATCHLIST",
+        });
+
+
+    await expect(
+      watchlistNav
+    ).toBeVisible();
+
+
+    await watchlistNav.click();
+
+
+    // ==================================================
+    // VERIFY ICICI IS TRACKED
+    // ==================================================
+
+    const removeIciciButton =
+      page.getByRole(
+        "button",
+        {
+          name:
+            "Remove ICICIBANK from watchlist",
+
+          exact:
+            true,
+        }
+      );
+
+
+    await expect(
+      removeIciciButton
+    ).toBeVisible({
+      timeout:
+        15_000,
+    });
+
+
+    // ==================================================
+    // PREPARE WEBSOCKET AFTER REMOVE
+    // ==================================================
+
+    await page.evaluate(
+      () => {
+
+        const testWindow =
+          window as typeof window & {
+            __NEXUS_E2E_TRACKED__?:
+            string[];
+          };
+
+
+        testWindow
+          .__NEXUS_E2E_TRACKED__ = [
+            "RELIANCE",
+          ];
+
+      }
+    );
+
+
+    // ==================================================
+    // REMOVE ICICI
+    // ==================================================
+
+    await removeIciciButton.click();
+
+
+    // ==================================================
+    // VERIFY MOCK DATABASE UPDATED
+    // ==================================================
+
+    await expect
+      .poll(
+        () =>
+          trackedSymbols.has(
+            "ICICIBANK"
+          ),
+        {
+          timeout:
+            10_000,
+
+          message:
+            "ICICIBANK was not removed from mocked Watchlist",
+        }
+      )
+      .toBe(
+        false
+      );
+
+
+    // ==================================================
+    // VERIFY WATCHLIST UI UPDATED
+    // ==================================================
+
+    await expect(
+      page.getByRole(
+        "button",
+        {
+          name:
+            "Remove ICICIBANK from watchlist",
+
+          exact:
+            true,
+        }
+      )
+    ).not.toBeVisible({
+      timeout:
+        10_000,
+    });
+
+
+    // ==================================================
+    // RETURN TO MARKET RADAR
+    // ==================================================
+
+    await marketRadarNav.click();
+
+
+    await expect(
+      page.getByText(
+        "NEXUS MARKET INTELLIGENCE",
+        {
+          exact:
+            true,
+        }
+      )
+    ).toBeVisible({
+      timeout:
+        15_000,
+    });
+
+
+    // ==================================================
+    // OPEN NSE UNIVERSE
+    // ==================================================
+
+    const universeTabAfterRemove =
+      page
+        .locator(
+          "button"
+        )
+        .filter({
+          hasText:
+            /NSE UNIVERSE|ALL STOCKS/i,
+        })
+        .first();
+
+
+    await universeTabAfterRemove.click();
+
+
+    const universeSearchAfterRemove =
+      page.getByPlaceholder(
+        /Search symbol or company/i
+      );
+
+
+    await universeSearchAfterRemove.fill(
+      "ICICIBANK"
+    );
+
+
+    // ==================================================
+    // VERIFY + WATCH RETURNS
+    // ==================================================
+
+    const iciciRowAfterRemove =
+      page
+        .locator(
+          "tbody tr"
+        )
+        .filter({
+          hasText:
+            "ICICIBANK",
+        })
+        .first();
+
+
+    await expect(
+      iciciRowAfterRemove
+    ).toBeVisible({
+      timeout:
+        15_000,
+    });
+
+
+    await expect(
+      iciciRowAfterRemove.getByRole(
+        "button",
+        {
+          name:
+            "+ WATCH",
+
+          exact:
+            true,
+        }
+      )
+    ).toBeVisible();
 
     // ==================================================
     // FINAL CHECKS
@@ -1891,7 +2272,7 @@ test(
       trackedSymbols.has(
         "ICICIBANK"
       )
-    ).toBeTruthy();
+    ).toBeFalsy();
 
 
     expect(

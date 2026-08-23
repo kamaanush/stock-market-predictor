@@ -63,6 +63,7 @@ type Props = {
   apiBase: string;
 
   liveStocks: LiveStock[];
+  trackedSymbols: string[];
 
   scanners: Record<
     string,
@@ -237,6 +238,7 @@ function signalClass(
 export default function MarketRadarPanel({
   apiBase,
   liveStocks,
+  trackedSymbols,
   scanners,
   onOpenStock,
   onAddToWatchlist,
@@ -263,15 +265,6 @@ export default function MarketRadarPanel({
     useState<
       RadarInstrument[]
     >([]);
-
-
-  const [
-    trackedSymbols,
-    setTrackedSymbols,
-  ] =
-    useState<string[]>(
-      []
-    );
 
 
   const [
@@ -464,117 +457,6 @@ export default function MarketRadarPanel({
         liveStocks,
       ]
     );
-
-
-  // ==================================================
-  // LOAD WATCHLIST SYMBOLS
-  // ==================================================
-
-  useEffect(
-    () => {
-
-      if (
-        activeTab !==
-        "all"
-      ) {
-        return;
-      }
-
-
-      let active =
-        true;
-
-
-      async function loadTrackedSymbols() {
-
-        try {
-
-          const response =
-            await fetch(
-              `${apiBase}/api/watchlist/symbols`,
-              {
-                credentials:
-                  "include",
-
-                cache:
-                  "no-store",
-              }
-            );
-
-
-          if (
-            !response.ok
-          ) {
-
-            throw new Error(
-              "Unable to load tracked symbols"
-            );
-
-          }
-
-
-          const data:
-            string[] =
-            await response
-              .json();
-
-
-          if (
-            !active
-          ) {
-            return;
-          }
-
-
-          setTrackedSymbols(
-            data.map(
-              (
-                symbol
-              ) =>
-                symbol
-                  .trim()
-                  .toUpperCase()
-            )
-          );
-
-
-        } catch (
-          error
-        ) {
-
-          if (
-            !active
-          ) {
-            return;
-          }
-
-
-          console.error(
-            "Market Radar watchlist lookup failed",
-            error
-          );
-
-        }
-
-      }
-
-
-      void loadTrackedSymbols();
-
-
-      return () => {
-
-        active =
-          false;
-
-      };
-
-    },
-    [
-      activeTab,
-      apiBase,
-    ]
-  );
 
 
   // ==================================================
@@ -826,39 +708,6 @@ export default function MarketRadarPanel({
 
       await onAddToWatchlist(
         item
-      );
-
-
-      setTrackedSymbols(
-        (
-          current
-        ) => {
-
-          const exists =
-            current.some(
-              (
-                symbol
-              ) =>
-                symbol
-                  .trim()
-                  .toUpperCase() ===
-                normalized
-            );
-
-
-          if (
-            exists
-          ) {
-            return current;
-          }
-
-
-          return [
-            ...current,
-            normalized,
-          ];
-
-        }
       );
 
 

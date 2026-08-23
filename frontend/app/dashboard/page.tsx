@@ -50,6 +50,16 @@ type InstrumentSearchResult = {
   kind: string;
 };
 
+type WatchlistItem = {
+  symbol: string;
+  name: string;
+  token: string;
+  kind: string;
+
+  last_price?: number | null;
+  change_percent?: number | null;
+};
+
 type DashboardView =
   | "overview"
   | "radar"
@@ -247,6 +257,19 @@ export default function Dashboard() {
   ] = useState<LiveStock[]>([]);
 
   const [
+    watchlistItems,
+    setWatchlistItems,
+  ] = useState<
+    WatchlistItem[]
+  >([]);
+
+
+  const [
+    watchlistLoading,
+    setWatchlistLoading,
+  ] = useState(false);
+
+  const [
     status,
     setStatus,
   ] = useState("CONNECTING");
@@ -410,6 +433,39 @@ export default function Dashboard() {
     lastAlertEventId,
     setLastAlertEventId,
   ] = useState(0);
+
+  // ==================================================
+  // TRACKED UNIVERSE
+  // DATABASE WATCHLIST = SOURCE OF TRUTH
+  // ==================================================
+
+  const trackedSymbols =
+    useMemo(
+      () =>
+        watchlistItems.map(
+          (
+            item
+          ) =>
+            item.symbol
+              .trim()
+              .toUpperCase()
+        ),
+      [
+        watchlistItems,
+      ]
+    );
+
+
+  const trackedSymbolSet =
+    useMemo(
+      () =>
+        new Set(
+          trackedSymbols
+        ),
+      [
+        trackedSymbols,
+      ]
+    );
 
 
   // ==================================================
@@ -934,29 +990,141 @@ export default function Dashboard() {
       ]
     );
 
+  // ==================================================
+  // DATABASE WATCHLIST + LIVE MARKET DATA
+  //
+  // Database decides WHICH stocks are tracked.
+  // WebSocket only enriches them with live data.
+  // ==================================================
+
+  const watchlistStocks =
+    useMemo(
+      () => {
+
+        const liveBySymbol =
+          new Map(
+            stocks.map(
+              (
+                stock
+              ) => [
+                  stock.symbol
+                    .trim()
+                    .toUpperCase(),
+                  stock,
+                ]
+            )
+          );
+
+
+        return watchlistItems.map(
+          (
+            item
+          ) => {
+
+            const symbol =
+              item.symbol
+                .trim()
+                .toUpperCase();
+
+
+            const live =
+              liveBySymbol.get(
+                symbol
+              );
+
+
+            const merged:
+              LiveStock = {
+
+              symbol,
+
+              token:
+                live?.token ||
+                item.token,
+
+              ltp:
+                typeof live?.ltp ===
+                  "number"
+
+                  ? live.ltp
+
+                  : typeof item.last_price ===
+                    "number"
+
+                    ? item.last_price
+
+                    : 0,
+
+              volume:
+                live?.volume ??
+                null,
+
+              exchange_timestamp:
+                live?.exchange_timestamp ??
+                null,
+
+              received_at:
+                live?.received_at,
+
+            };
+
+
+            return merged;
+
+          }
+        );
+
+      },
+      [
+        stocks,
+        watchlistItems,
+      ]
+    );
+
+
+  const sortedWatchlistStocks =
+    useMemo(
+      () =>
+        [
+          ...watchlistStocks,
+        ].sort(
+          (
+            first,
+            second
+          ) =>
+            first.symbol.localeCompare(
+              second.symbol
+            )
+        ),
+      [
+        watchlistStocks,
+      ]
+    );
 
   // ==================================================
   // TRACKED SCANNER UNIVERSE
+  //
+  // IMPORTANT:
+  // Database Watchlist is the source of truth.
+  //
+  // WebSocket data is ONLY used for live prices.
+  // A stock does not need to receive a live tick
+  // before the AI Scanner can scan it.
   // ==================================================
 
   const scannerSymbolsKey =
     useMemo(
       () =>
-        sortedStocks
-          .map(
-            (
-              stock
-            ) =>
-              stock.symbol
-                .trim()
-                .toUpperCase()
-          )
+        [
+          ...trackedSymbols,
+        ]
           .filter(
             Boolean
           )
+          .sort()
           .join(","),
       [
-        sortedStocks,
+        trackedSymbols,
       ]
     );
 
@@ -1321,6 +1489,83 @@ export default function Dashboard() {
     ]
   );
 
+  // ==================================================
+  // DATABASE WATCHLIST
+  // ==================================================
+
+  async function loadWatchlist() {
+
+    setWatchlistLoading(
+      true
+    );
+
+
+    try {
+
+      const response =
+        await fetch(
+          `${API_BASE}/api/watchlist`,
+          {
+            credentials:
+              "include",
+
+            cache:
+              "no-store",
+          }
+        );
+
+
+      if (
+        !response.ok
+      ) {
+
+        throw new Error(
+          await response.text()
+        );
+
+      }
+
+
+      const data:
+        WatchlistItem[] =
+        await response.json();
+
+
+      setWatchlistItems(
+        data.map(
+          (
+            item
+          ) => ({
+            ...item,
+
+            symbol:
+              item.symbol
+                .trim()
+                .toUpperCase(),
+          })
+        )
+      );
+
+
+    } catch (
+    error
+    ) {
+
+      console.error(
+        "Could not load database watchlist:",
+        error
+      );
+
+
+    } finally {
+
+      setWatchlistLoading(
+        false
+      );
+
+    }
+
+  }
 
   // ==================================================
   // PORTFOLIO + ALERTS
@@ -1393,15 +1638,25 @@ export default function Dashboard() {
     }
   }
 
-
   useEffect(() => {
-    if (authenticated !== true) {
+
+    if (
+      authenticated !==
+      true
+    ) {
       return;
     }
 
+
+    void loadWatchlist();
+
     void loadPortfolio();
+
     void loadAlerts();
-  }, [authenticated]);
+
+  }, [
+    authenticated,
+  ]);
 
 
   useEffect(() => {
@@ -2008,7 +2263,53 @@ export default function Dashboard() {
           `${symbol} is already in the watchlist`
         );
 
+        setWatchlistItems(
+          (
+            current
+          ) => {
 
+            const exists =
+              current.some(
+                (
+                  existing
+                ) =>
+                  existing.symbol
+                    .trim()
+                    .toUpperCase() ===
+                  symbol
+              );
+
+
+            if (
+              exists
+            ) {
+              return current;
+            }
+
+
+            return [
+              ...current,
+              {
+                symbol,
+                name:
+                  item.name,
+
+                token:
+                  item.token,
+
+                kind:
+                  item.kind,
+
+                last_price:
+                  null,
+
+                change_percent:
+                  null,
+              },
+            ];
+
+          }
+        );
         setStocks(
           (
             current
@@ -2145,7 +2446,87 @@ export default function Dashboard() {
         )
           .trim()
           .toUpperCase();
+      setWatchlistItems(
+        (
+          current
+        ) => {
 
+          const nextItem:
+            WatchlistItem = {
+
+            symbol:
+              savedSymbol,
+
+            name:
+              saved.name ||
+              item.name,
+
+            token:
+              saved.token ||
+              item.token,
+
+            kind:
+              saved.kind ||
+              item.kind,
+
+            last_price:
+              typeof saved.last_price ===
+                "number"
+
+                ? saved.last_price
+
+                : null,
+
+            change_percent:
+              typeof saved.change_percent ===
+                "number"
+
+                ? saved.change_percent
+
+                : null,
+          };
+
+
+          const index =
+            current.findIndex(
+              (
+                existing
+              ) =>
+                existing.symbol
+                  .trim()
+                  .toUpperCase() ===
+                savedSymbol
+            );
+
+
+          if (
+            index ===
+            -1
+          ) {
+
+            return [
+              ...current,
+              nextItem,
+            ];
+
+          }
+
+
+          const next = [
+            ...current,
+          ];
+
+
+          next[
+            index
+          ] =
+            nextItem;
+
+
+          return next;
+
+        }
+      );
 
       // ==========================================
       // UPDATE UI IMMEDIATELY
@@ -2309,6 +2690,190 @@ export default function Dashboard() {
 
   }
 
+  async function removeInstrumentFromWatchlist(
+    symbol: string
+  ) {
+
+    const normalized =
+      symbol
+        .trim()
+        .toUpperCase();
+
+
+    setWatchlistMessage(
+      ""
+    );
+
+
+    try {
+
+      const response =
+        await fetch(
+          `${API_BASE}/api/watchlist/${encodeURIComponent(
+            normalized
+          )}`,
+          {
+            method:
+              "DELETE",
+
+            credentials:
+              "include",
+          }
+        );
+
+
+      if (
+        response.status ===
+        401
+      ) {
+
+        setAuthenticated(
+          false
+        );
+
+        return;
+      }
+
+
+      if (
+        !response.ok &&
+        response.status !==
+        204
+      ) {
+
+        throw new Error(
+          await response.text()
+        );
+
+      }
+
+
+      // ==========================================
+      // REMOVE FROM DATABASE-BACKED UI STATE
+      // ==========================================
+
+      setWatchlistItems(
+        (
+          current
+        ) =>
+          current.filter(
+            (
+              item
+            ) =>
+              item.symbol
+                .trim()
+                .toUpperCase() !==
+              normalized
+          )
+      );
+
+
+      // ==========================================
+      // REMOVE STALE LIVE ENTRY
+      // ==========================================
+
+      setStocks(
+        (
+          current
+        ) =>
+          current.filter(
+            (
+              stock
+            ) =>
+              stock.symbol
+                .trim()
+                .toUpperCase() !==
+              normalized
+          )
+      );
+
+
+      // ==========================================
+      // REMOVE OLD SCANNER RESULT
+      // ==========================================
+
+      setScanners(
+        (
+          current
+        ) => {
+
+          const next = {
+            ...current,
+          };
+
+
+          delete next[
+            normalized
+          ];
+
+
+          return next;
+
+        }
+      );
+
+
+      // ==========================================
+      // CLEAR SELECTION IF REMOVED STOCK
+      // ==========================================
+
+      setSelected(
+        (
+          current
+        ) =>
+          current ===
+            normalized
+
+            ? ""
+
+            : current
+      );
+
+
+      setFullScreenChart(
+        false
+      );
+
+
+      // Reconnect market WebSocket using
+      // updated backend subscriptions.
+
+      setWsVersion(
+        (
+          current
+        ) =>
+          current + 1
+      );
+
+
+      setWatchlistMessage(
+        `${normalized} removed from watchlist`
+      );
+
+
+    } catch (
+    error
+    ) {
+
+      const message =
+        error instanceof Error
+          ? error.message
+          : "Could not remove stock";
+
+
+      console.error(
+        "Could not remove stock from watchlist:",
+        message
+      );
+
+
+      setWatchlistMessage(
+        message
+      );
+
+    }
+
+  }
 
   function handleNavigation(
     title: string
@@ -2380,13 +2945,15 @@ export default function Dashboard() {
   const selectedStock =
     useMemo(
       () =>
-        stocks.find(
-          (stock) =>
+        watchlistStocks.find(
+          (
+            stock
+          ) =>
             stock.symbol ===
             selected
         ),
       [
-        stocks,
+        watchlistStocks,
         selected,
       ]
     );
@@ -3767,6 +4334,9 @@ export default function Dashboard() {
           <MarketRadarPanel
             apiBase={API_BASE}
             liveStocks={stocks}
+            trackedSymbols={
+              trackedSymbols
+            }
             scanners={scanners}
 
             onOpenStock={(symbol) => {
@@ -4138,7 +4708,7 @@ export default function Dashboard() {
                 </span>
 
                 <span className="counter">
-                  {stocks.length}
+                  {watchlistStocks.length}
                 </span>
 
               </div>
@@ -4167,7 +4737,7 @@ export default function Dashboard() {
 
               <div className="watch-scroll">
 
-                {sortedStocks.length ===
+                {sortedWatchlistStocks.length ===
                   0 ? (
 
                   <div className="waiting">
@@ -4180,7 +4750,7 @@ export default function Dashboard() {
 
                 ) : (
 
-                  sortedStocks.map(
+                  sortedWatchlistStocks.map(
                     (stock) => {
 
                       const scanner =
@@ -4191,69 +4761,155 @@ export default function Dashboard() {
 
                       return (
 
-                        <button
+                        <div
                           key={
                             stock.symbol
                           }
-                          className={
-                            stock.symbol ===
-                              selected
-                              ? "watch-row selected-stock"
-                              : "watch-row"
-                          }
-                          onClick={
-                            () =>
-                              openFullScreenChart(
-                                stock.symbol
-                              )
-                          }
+                          style={{
+                            display:
+                              "grid",
+
+                            gridTemplateColumns:
+                              "1fr auto",
+
+                            gap:
+                              "6px",
+
+                            alignItems:
+                              "stretch",
+                          }}
                         >
 
-                          <strong>
+                          {/* ==========================================
+      OPEN STOCK / CHART
+    ========================================== */}
 
-                            {
-                              stock.symbol
+                          <button
+                            type="button"
+
+                            className={
+                              stock.symbol ===
+                                selected
+
+                                ? "watch-row selected-stock"
+
+                                : "watch-row"
                             }
 
-                          </strong>
+                            onClick={
+                              () =>
+                                openFullScreenChart(
+                                  stock.symbol
+                                )
+                            }
+                          >
+
+                            <strong>
+
+                              {
+                                stock.symbol
+                              }
+
+                            </strong>
 
 
-                          <span className="live-price">
+                            <span className="live-price">
 
-                            ₹
-                            {stock.ltp.toFixed(
-                              2
+                              ₹
+                              {stock.ltp.toFixed(
+                                2
+                              )}
+
+                            </span>
+
+
+                            <span>
+
+                              {stock.volume ??
+                                "—"}
+
+                            </span>
+
+
+                            {scanner ? (
+
+                              <SignalBadge
+                                signal={
+                                  scanner.signal
+                                }
+                                small
+                              />
+
+                            ) : (
+
+                              <b>
+                                LIVE
+                              </b>
+
                             )}
 
-                          </span>
+                          </button>
 
 
-                          <span>
+                          {/* ==========================================
+      REMOVE FROM WATCHLIST
+    ========================================== */}
 
-                            {stock.volume ??
-                              "—"}
+                          <button
+                            type="button"
 
-                          </span>
+                            aria-label={
+                              `Remove ${stock.symbol} from watchlist`
+                            }
 
+                            title={
+                              `Remove ${stock.symbol}`
+                            }
 
-                          {scanner ? (
-
-                            <SignalBadge
-                              signal={
-                                scanner.signal
+                            onClick={
+                              () => {
+                                void removeInstrumentFromWatchlist(
+                                  stock.symbol
+                                );
                               }
-                              small
-                            />
+                            }
 
-                          ) : (
+                            style={{
+                              border:
+                                "1px solid rgba(239,68,68,.32)",
 
-                            <b>
-                              LIVE
-                            </b>
+                              borderRadius:
+                                "6px",
 
-                          )}
+                              background:
+                                "rgba(239,68,68,.08)",
 
-                        </button>
+                              color:
+                                "#ff8c8c",
+
+                              padding:
+                                "0 10px",
+
+                              minWidth:
+                                "64px",
+
+                              cursor:
+                                "pointer",
+
+                              fontSize:
+                                "9px",
+
+                              fontWeight:
+                                800,
+
+                              letterSpacing:
+                                ".06em",
+                            }}
+                          >
+                            REMOVE
+                          </button>
+
+                        </div>
 
                       );
                     }
