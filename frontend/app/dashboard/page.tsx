@@ -14,6 +14,8 @@ import StockLoader from "../../components/StockLoader";
 import OverviewPanel from "../../components/dashboard/OverviewPanel";
 import ScannerPanel from "../../components/dashboard/ScannerPanel";
 import MarketRadarPanel from "../../components/dashboard/MarketRadarPanel";
+import BacktestPanel from "../../components/dashboard/BacktestPanel";
+import WeatherRainBackground from "../../components/WeatherRainBackground";
 
 type LiveStock = {
   symbol: string;
@@ -265,11 +267,6 @@ export default function Dashboard() {
 
 
   const [
-    watchlistLoading,
-    setWatchlistLoading,
-  ] = useState(false);
-
-  const [
     status,
     setStatus,
   ] = useState("CONNECTING");
@@ -455,17 +452,6 @@ export default function Dashboard() {
       ]
     );
 
-
-  const trackedSymbolSet =
-    useMemo(
-      () =>
-        new Set(
-          trackedSymbols
-        ),
-      [
-        trackedSymbols,
-      ]
-    );
 
 
   // ==================================================
@@ -969,28 +955,6 @@ export default function Dashboard() {
 
 
   // ==================================================
-  // SORT STOCKS
-  // ==================================================
-
-  const sortedStocks =
-    useMemo(
-      () =>
-        [...stocks].sort(
-          (
-            first,
-            second
-          ) =>
-            first.symbol
-              .localeCompare(
-                second.symbol
-              )
-        ),
-      [
-        stocks,
-      ]
-    );
-
-  // ==================================================
   // DATABASE WATCHLIST + LIVE MARKET DATA
   //
   // Database decides WHICH stocks are tracked.
@@ -1128,6 +1092,88 @@ export default function Dashboard() {
       ]
     );
 
+  // ==================================================
+  // PRUNE STALE SCANNER RESULTS
+  //
+  // Database Watchlist is the source of truth.
+  // Scanner results must never survive after
+  // a symbol leaves the tracked universe.
+  // ==================================================
+
+  useEffect(
+    () => {
+
+      const allowedSymbols =
+        new Set(
+          trackedSymbols
+        );
+
+
+      setScanners(
+        (
+          current
+        ) => {
+
+          let changed =
+            false;
+
+
+          const next:
+            Record<
+              string,
+              ScannerResult
+            > = {};
+
+
+          for (
+            const [
+              symbol,
+              result,
+            ]
+            of Object.entries(
+              current
+            )
+          ) {
+
+            const normalized =
+              symbol
+                .trim()
+                .toUpperCase();
+
+
+            if (
+              allowedSymbols.has(
+                normalized
+              )
+            ) {
+
+              next[
+                normalized
+              ] =
+                result;
+
+            } else {
+
+              changed =
+                true;
+
+            }
+
+          }
+
+
+          return changed
+            ? next
+            : current;
+
+        }
+      );
+
+    },
+    [
+      trackedSymbols,
+    ]
+  );
 
   // ==================================================
   // V2 SCANNER
@@ -1495,11 +1541,6 @@ export default function Dashboard() {
 
   async function loadWatchlist() {
 
-    setWatchlistLoading(
-      true
-    );
-
-
     try {
 
       const response =
@@ -1556,15 +1597,7 @@ export default function Dashboard() {
         error
       );
 
-
-    } finally {
-
-      setWatchlistLoading(
-        false
-      );
-
     }
-
   }
 
   // ==================================================
@@ -3628,7 +3661,7 @@ export default function Dashboard() {
 
   return (
     <main className="terminal">
-
+      <WeatherRainBackground />
 
       {/* ==========================================
         FULL SCREEN STOCK CHART
@@ -4323,6 +4356,42 @@ export default function Dashboard() {
               setActiveView("watchlist");
             }}
           />
+        )}
+
+        {activeView === "backtest" && (
+
+          <BacktestPanel
+            apiBase={
+              API_BASE
+            }
+
+            symbols={
+              trackedSymbols
+            }
+
+            defaultSymbol={
+              selected ||
+              trackedSymbols[0] ||
+              ""
+            }
+
+            defaultTimeframe={
+              scannerTimeframe
+            }
+
+            onOpenChart={
+              (
+                symbol
+              ) => {
+
+                openFullScreenChart(
+                  symbol
+                );
+
+              }
+            }
+          />
+
         )}
 
         {/* ==========================================
@@ -5590,32 +5659,6 @@ export default function Dashboard() {
 
         )}
 
-        {activeView === "backtest" && (
-          <section
-            id="backtest-section"
-            className="glass"
-            style={{
-              marginTop: "12px",
-              padding: "18px",
-            }}
-          >
-            <span className="eyebrow">
-              BACKTEST LAB
-            </span>
-            <p
-              style={{
-                color: "#71869c",
-                fontSize: "11px",
-                marginTop: "10px",
-              }}
-            >
-              Backtest navigation is active and ready for
-              your V2 backtest endpoints.
-            </p>
-          </section>
-
-
-        )}
 
         {activeView === "analytics" && (
           <section

@@ -2175,6 +2175,80 @@ test(
         10_000,
     });
 
+// ==================================================
+// VERIFY SCANNER STATE WAS PRUNED
+// ==================================================
+
+await scannerNav.click();
+
+
+await expect(
+  page
+    .getByText(
+      "ICICIBANK",
+      {
+        exact:
+          true,
+      }
+    )
+).not.toBeVisible({
+  timeout:
+    10_000,
+});
+
+
+// ==================================================
+// VERIFY MARKET RADAR HAS NO STALE RESULT
+// ==================================================
+
+await marketRadarNav.click();
+
+
+await expect(
+  page.getByText(
+    "NEXUS MARKET INTELLIGENCE",
+    {
+      exact:
+        true,
+    }
+  )
+).toBeVisible({
+  timeout:
+    15_000,
+});
+
+
+const topOpportunitiesAfterRemove =
+  page
+    .locator(
+      "button"
+    )
+    .filter({
+      hasText:
+        "TOP OPPORTUNITIES",
+    })
+    .first();
+
+
+await topOpportunitiesAfterRemove.click();
+
+
+const staleIciciOpportunity =
+  page
+    .locator(
+      "tbody tr"
+    )
+    .filter({
+      hasText:
+        "ICICIBANK",
+    });
+
+
+await expect(
+  staleIciciOpportunity
+).toHaveCount(
+  0
+);
 
     // ==================================================
     // RETURN TO MARKET RADAR
