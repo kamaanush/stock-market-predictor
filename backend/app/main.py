@@ -649,18 +649,31 @@ async def backtest_symbol(
             ),
         )
 
-    symbol_upper = symbol.upper()
+    symbol_upper = (
+        symbol
+        .strip()
+        .upper()
+    )
 
     instrument = await resolve_instrument(
         session,
         symbol_upper,
     )
 
+    history_days = {
+        "1m": 5,
+        "5m": 15,
+        "15m": 30,
+    }[interval]
+
     try:
-        candles = await market().candles(
-            instrument.symbol,
-            interval,
-            instrument.token,
+        candles = (
+            await market().historical_candles(
+                instrument.symbol,
+                interval,
+                instrument.token,
+                days=history_days,
+            )
         )
 
         result = run_backtest(
@@ -690,8 +703,6 @@ async def backtest_symbol(
                 f"{symbol_upper}: {exc}"
             ),
         ) from exc
-
-
 
 @app.get(
     "/api/v2/backtest-history/{symbol}",
@@ -1099,7 +1110,118 @@ async def refresh_instruments(
 
     return {"imported": len(instruments)}
 
+@app.get(
+    "/api/watchlist",
+    response_model=list[WatchlistOut],
+    dependencies=[
+        Depends(
+            require_owner
+        )
+    ],
+)
+async def get_watchlist(
+    session: AsyncSession = Depends(
+        get_session
+    ),
+) -> list[WatchlistOut]:
 
+    items = list(
+        (
+            await session.execute(
+                select(
+                    WatchlistItem
+                ).order_by(
+                    WatchlistItem.symbol
+                )
+            )
+        ).scalars()
+    )
+
+
+    live_tracker = getattr(
+        app.state,
+        "live_market",
+        None,
+    )
+
+
+    output: list[
+        WatchlistOut
+    ] = []
+
+
+    for item in items:
+
+        last_price = None
+
+
+        if (
+            live_tracker
+            is not None
+        ):
+
+            latest = (
+                live_tracker
+                .get_latest(
+                    item.symbol
+                )
+            )
+
+
+            if (
+                latest
+                is not None
+            ):
+
+                value = latest.get(
+                    "ltp"
+                )
+
+
+                if (
+                    value
+                    is not None
+                ):
+
+                    try:
+
+                        last_price = float(
+                            value
+                        )
+
+                    except (
+                        TypeError,
+                        ValueError,
+                    ):
+
+                        last_price = None
+
+
+        output.append(
+            WatchlistOut(
+                symbol=
+                    item.symbol,
+
+                name=
+                    item.name,
+
+                token=
+                    item.token,
+
+                kind=
+                    item.kind,
+
+                last_price=
+                    last_price,
+
+                change_percent=
+                    None,
+            )
+        )
+
+
+    return output
+    
 @app.post(
     "/api/watchlist",
     response_model=WatchlistOut,
