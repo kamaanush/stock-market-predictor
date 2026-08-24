@@ -15,7 +15,6 @@ import OverviewPanel from "../../components/dashboard/OverviewPanel";
 import ScannerPanel from "../../components/dashboard/ScannerPanel";
 import MarketRadarPanel from "../../components/dashboard/MarketRadarPanel";
 import BacktestPanel from "../../components/dashboard/BacktestPanel";
-import WeatherRainBackground from "../../components/WeatherRainBackground";
 
 type LiveStock = {
   symbol: string;
@@ -3661,7 +3660,6 @@ export default function Dashboard() {
 
   return (
     <main className="terminal">
-      <WeatherRainBackground />
 
       {/* ==========================================
         FULL SCREEN STOCK CHART
