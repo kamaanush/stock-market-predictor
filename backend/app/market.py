@@ -626,6 +626,21 @@ class AngelOneMarketData:
                 "SmartAPI login succeeded "
                 "but feed token is missing"
             )
+    async def historical_candles(
+        self,
+        symbol: str,
+        interval: str,
+        token: str,
+        days: int = 30,
+    ) -> list[
+        dict[str, float]
+    ]:
+        return await self._get_cached_candles(
+            symbol=symbol,
+            interval=interval,
+            token=token,
+            days=days,
+        )
 
     @staticmethod
     def _is_invalid_token(
@@ -944,6 +959,219 @@ class AngelOneMarketData:
             raise RuntimeError(
                 "Unable to fetch candles"
             )
+    async def long_intraday_history(
+        self,
+        symbol: str,
+        interval: str,
+        token: str,
+        days: int,
+    ) -> list[
+        dict[str, float]
+    ]:
+        """
+        Fetch extended intraday history using
+        multiple SmartAPI requests.
+
+        SmartAPI maximum range per request:
+        1m  -> 30 days
+        5m  -> 100 days
+        15m -> 200 days
+        """
+
+        if days < 1:
+            raise ValueError(
+                "Days must be at least 1"
+            )
+
+        chunk_days_by_interval = {
+            "1m": 25,
+            "5m": 90,
+            "15m": 190,
+        }
+
+        if interval not in chunk_days_by_interval:
+            raise ValueError(
+                "Long intraday history supports "
+                "1m, 5m, or 15m"
+            )
+
+        chunk_days = (
+            chunk_days_by_interval[
+                interval
+            ]
+        )
+
+        end_date = datetime.now(
+            IST
+        )
+
+        start_date = (
+            end_date
+            - timedelta(
+                days=days
+            )
+        )
+
+        all_candles: list[
+            dict[str, float]
+        ] = []
+
+        current_start = start_date
+
+        loop = (
+            asyncio.get_running_loop()
+        )
+
+        chunk_number = 0
+
+        while current_start < end_date:
+
+            current_end = min(
+                current_start
+                + timedelta(
+                    days=chunk_days
+                ),
+                end_date,
+            )
+
+            chunk_number += 1
+
+            print(
+                "[SmartAPI intraday history]",
+                symbol,
+                interval,
+                "chunk",
+                chunk_number,
+                current_start.date(),
+                "->",
+                current_end.date(),
+            )
+
+            candles: list[
+                dict[str, float]
+            ] = []
+
+            last_error: Optional[
+                Exception
+            ] = None
+
+            async with self._candle_lock:
+
+                elapsed = (
+                    loop.time()
+                    - self._last_candle_request
+                )
+
+                if (
+                    elapsed
+                    < self._minimum_request_gap
+                ):
+                    await asyncio.sleep(
+                        self._minimum_request_gap
+                        - elapsed
+                    )
+
+                for attempt in range(3):
+
+                    try:
+
+                        candles = (
+                            await asyncio.to_thread(
+                                self._fetch_candle_payload_sync,
+                                symbol=symbol,
+                                token=token,
+                                interval=interval,
+                                from_date=current_start,
+                                to_date=current_end,
+                            )
+                        )
+
+                        self._last_candle_request = (
+                            loop.time()
+                        )
+
+                        last_error = None
+                        break
+
+                    except Exception as exc:
+
+                        last_error = exc
+
+                        self._last_candle_request = (
+                            loop.time()
+                        )
+
+                        if (
+                            not
+                            self._is_transient_candle_error(
+                                exc
+                            )
+                            or attempt >= 2
+                        ):
+                            raise
+
+                        delay = (
+                            2.0
+                            * (
+                                attempt + 1
+                            )
+                        )
+
+                        print(
+                            "[SmartAPI intraday history] "
+                            "retrying in",
+                            delay,
+                            "seconds",
+                        )
+
+                        await asyncio.sleep(
+                            delay
+                        )
+
+            if (
+                last_error is not None
+                and not candles
+            ):
+                raise last_error
+
+            all_candles.extend(
+                candles
+            )
+
+            current_start = (
+                current_end
+            )
+
+        unique: dict[
+            int,
+            dict[str, float]
+        ] = {}
+
+        for candle in all_candles:
+            unique[
+                int(candle["time"])
+            ] = candle
+
+        result = sorted(
+            unique.values(),
+            key=lambda item: (
+                item["time"]
+            ),
+        )
+
+        print(
+            "[SmartAPI intraday history]",
+            symbol,
+            interval,
+            "days:",
+            days,
+            "candles:",
+            len(result),
+            "chunks:",
+            chunk_number,
+        )
+
+        return result
 
     async def long_daily_history(
         self,
@@ -1240,7 +1468,33 @@ class AngelOneMarketData:
         dict[str, float]
     ]:
 
-        return await self._get_cached_candles(
+        single_request_limits = {
+            "1m": 30,
+            "5m": 100,
+            "15m": 200,
+        }
+
+        limit = (
+            single_request_limits.get(
+                interval
+            )
+        )
+
+        if limit is None:
+            raise ValueError(
+                "Historical timeframe must be "
+                "1m, 5m, or 15m"
+            )
+
+        if days <= limit:
+            return await self._get_cached_candles(
+                symbol=symbol,
+                interval=interval,
+                token=token,
+                days=days,
+            )
+
+        return await self.long_intraday_history(
             symbol=symbol,
             interval=interval,
             token=token,
@@ -1253,7 +1507,6 @@ class AngelOneMarketData:
     ) -> list[
         dict[str, float]
     ]:
-
         output: list[
             dict[str, float]
         ] = []
@@ -1262,7 +1515,6 @@ class AngelOneMarketData:
             "data",
             [],
         ):
-
             timestamp_text = str(
                 row[0]
             )
@@ -1309,7 +1561,6 @@ def create_market_data(
     DemoMarketData,
     AngelOneMarketData,
 ]:
-
     if settings.smartapi_ready:
         return AngelOneMarketData(
             settings

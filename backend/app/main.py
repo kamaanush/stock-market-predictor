@@ -634,6 +634,7 @@ async def backtest_symbol(
     symbol: str,
     interval: str = "5m",
     minimum_confidence: int = 60,
+    days: Optional[int] = None,
     session: AsyncSession = Depends(get_session),
 ):
     if interval not in {
@@ -660,20 +661,32 @@ async def backtest_symbol(
         symbol_upper,
     )
 
-    history_days = {
+    default_history_days = {
         "1m": 5,
         "5m": 15,
         "15m": 30,
-    }[interval]
+    }
+
+    history_days = (
+        days
+        if days is not None
+        else default_history_days[interval]
+    )
+
+    if history_days < 1:
+        raise HTTPException(
+            status_code=422,
+            detail="days must be at least 1",
+        )
 
     try:
-        candles = (
-            await market().historical_candles(
-                instrument.symbol,
-                interval,
-                instrument.token,
-                days=history_days,
-            )
+        provider = market()
+
+        candles = await provider.historical_candles(
+            instrument.symbol,
+            interval,
+            instrument.token,
+            days=history_days,
         )
 
         result = run_backtest(
@@ -685,9 +698,24 @@ async def backtest_symbol(
             max_hold_bars=12,
         )
 
-        return backtest_to_dict(
+        response = backtest_to_dict(
             result
         )
+
+        response["requested_days"] = (
+            history_days
+        )
+
+        response["market_mode"] = (
+            "demo"
+            if isinstance(
+                provider,
+                DemoMarketData,
+            )
+            else "smartapi"
+        )
+
+        return response
 
     except ValueError as exc:
         raise HTTPException(
@@ -699,8 +727,8 @@ async def backtest_symbol(
         raise HTTPException(
             status_code=500,
             detail=(
-                f"Backtest failed for "
-                f"{symbol_upper}: {exc}"
+                "Historical backtest failed "
+                f"for {symbol_upper}: {exc}"
             ),
         ) from exc
 
@@ -766,7 +794,7 @@ async def backtest_history(
             result
         )
 
-        response["requested_days"] = days
+        response["requested_days"] = history_days
 
         response["market_mode"] = (
             "demo"

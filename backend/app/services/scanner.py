@@ -492,3 +492,311 @@ def scan_symbol(
         )
 
     return result
+
+    def prepare_scanner_dataframe(
+    candles: list[dict[str, Any]],
+) -> pd.DataFrame:
+    """
+    Calculate all indicators once for an entire
+    historical candle set.
+
+    Backtesting can then read individual historical
+    rows without recalculating EMA/RSI/MACD/etc.
+    """
+
+    dataframe = candles_to_dataframe(
+        candles
+    )
+
+    return calculate_indicators(
+        dataframe
+    )
+
+
+def scan_symbol_from_dataframe(
+    symbol: str,
+    dataframe: pd.DataFrame,
+    index: int,
+) -> dict[str, Any]:
+    """
+    Generate exactly the same scanner result as
+    scan_symbol(), but use indicators that were
+    already calculated.
+
+    Only information at `index` and earlier is used.
+    """
+
+    if index < 1:
+        raise ValueError(
+            "At least two historical rows are required"
+        )
+
+    if index >= len(dataframe):
+        raise ValueError(
+            "Scanner index is outside dataframe"
+        )
+
+    required = [
+        "ema_fast",
+        "ema_slow",
+        "rsi",
+        "macd",
+        "macd_signal",
+        "vwap",
+        "atr",
+        "supertrend",
+        "adx",
+        "plus_di",
+        "minus_di",
+        "average_volume",
+    ]
+
+    latest_row = dataframe.iloc[
+        index
+    ]
+
+    previous_row = dataframe.iloc[
+        index - 1
+    ]
+
+    # Normally all indicators are valid after the
+    # backtest warmup. Fall back to the previous
+    # usable rows only if an unexpected NaN appears.
+    if (
+        latest_row[required].isna().any()
+        or previous_row[required].isna().any()
+    ):
+        usable = (
+            dataframe
+            .iloc[: index + 1]
+            .dropna(
+                subset=required
+            )
+        )
+
+        if len(usable) < 2:
+            raise ValueError(
+                "Not enough completed indicator rows "
+                "to generate a signal"
+            )
+
+        latest_row = (
+            usable.iloc[-1]
+        )
+
+        previous_row = (
+            usable.iloc[-2]
+        )
+
+    latest = clean_record(
+        latest_row.to_dict()
+    )
+
+    previous = clean_record(
+        previous_row.to_dict()
+    )
+
+    cpr = calculate_cpr(
+        previous_high=previous["high"],
+        previous_low=previous["low"],
+        previous_close=previous["close"],
+        current_price=latest["close"],
+    )
+
+    pattern_result = detect_pattern(
+        previous=previous,
+        current=latest,
+    )
+
+    signal_result = generate_signal(
+        latest=latest,
+        previous=previous,
+        pattern_name=(
+            pattern_result.name
+            if pattern_result
+            else None
+        ),
+        pattern_direction=(
+            pattern_result.direction
+            if pattern_result
+            else None
+        ),
+        pattern_confidence=(
+            pattern_result.confidence
+            if pattern_result
+            else None
+        ),
+    )
+
+    result: dict[str, Any] = {
+        "symbol": symbol.upper(),
+
+        **asdict(signal_result),
+
+        "last_price": round(
+            float(latest.get("close", 0)),
+            2,
+        ),
+
+        "ema_fast": round(
+            float(latest.get("ema_fast", 0)),
+            2,
+        ),
+
+        "ema_slow": round(
+            float(latest.get("ema_slow", 0)),
+            2,
+        ),
+
+        "rsi": round(
+            float(latest.get("rsi", 0)),
+            2,
+        ),
+
+        "macd": round(
+            float(latest.get("macd", 0)),
+            4,
+        ),
+
+        "macd_signal": round(
+            float(
+                latest.get(
+                    "macd_signal",
+                    0,
+                )
+            ),
+            4,
+        ),
+
+        "macd_histogram": round(
+            float(
+                latest.get(
+                    "macd_histogram",
+                    0,
+                )
+            ),
+            4,
+        ),
+
+        "vwap": round(
+            float(latest.get("vwap", 0)),
+            2,
+        ),
+
+        "atr": round(
+            float(latest.get("atr", 0)),
+            2,
+        ),
+
+        "supertrend": round(
+            float(
+                latest.get(
+                    "supertrend",
+                    0,
+                )
+            ),
+            2,
+        ),
+
+        "supertrend_direction": bool(
+            latest.get(
+                "supertrend_direction",
+                True,
+            )
+        ),
+
+        "adx": round(
+            float(latest.get("adx", 0)),
+            2,
+        ),
+
+        "plus_di": round(
+            float(latest.get("plus_di", 0)),
+            2,
+        ),
+
+        "minus_di": round(
+            float(latest.get("minus_di", 0)),
+            2,
+        ),
+
+        "volume": round(
+            float(latest.get("volume", 0)),
+            2,
+        ),
+
+        "average_volume": round(
+            float(
+                latest.get(
+                    "average_volume",
+                    0,
+                )
+            ),
+            2,
+        ),
+
+        "bollinger_upper": round(
+            float(
+                latest.get(
+                    "bollinger_upper",
+                    0,
+                )
+            ),
+            2,
+        ),
+
+        "bollinger_middle": round(
+            float(
+                latest.get(
+                    "bollinger_middle",
+                    0,
+                )
+            ),
+            2,
+        ),
+
+        "bollinger_lower": round(
+            float(
+                latest.get(
+                    "bollinger_lower",
+                    0,
+                )
+            ),
+            2,
+        ),
+
+        "pivot": cpr.pivot,
+        "cpr_top": cpr.top_central,
+        "cpr_bottom": cpr.bottom_central,
+        "cpr_width": cpr.width,
+        "cpr_width_percent": (
+            cpr.width_percent
+        ),
+        "cpr_classification": (
+            cpr.classification
+        ),
+        "pivot_position": cpr.position,
+
+        "pattern": None,
+        "pattern_direction": None,
+        "pattern_confidence": None,
+    }
+
+    if pattern_result:
+        result["pattern"] = (
+            pattern_result.name
+        )
+
+        result[
+            "pattern_direction"
+        ] = (
+            pattern_result.direction
+        )
+
+        result[
+            "pattern_confidence"
+        ] = (
+            pattern_result.confidence
+        )
+
+    return result
