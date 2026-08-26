@@ -73,6 +73,8 @@ def build_pipeline_analysis(
     candles: Optional[
         list[dict[str, Any]]
     ] = None,
+    prepared_dataframe: Optional[Any] = None,
+    prepared_index: Optional[int] = None,
 ) -> dict[str, Any]:
 
     # ---------------------------------------------------------
@@ -328,11 +330,38 @@ def build_pipeline_analysis(
 
     if candles and len(candles) >= 3:
         try:
-            usable = (
-                get_usable_dataframe(
-                    candles
+            if (
+                prepared_dataframe is not None
+                and prepared_index is not None
+            ):
+                usable = (
+                    prepared_dataframe
+                    .iloc[
+                        : prepared_index + 1
+                    ]
+                    .dropna(
+                        subset=[
+                            "ema_fast",
+                            "ema_slow",
+                            "rsi",
+                            "macd",
+                            "macd_signal",
+                            "vwap",
+                            "atr",
+                            "supertrend",
+                            "adx",
+                            "plus_di",
+                            "minus_di",
+                            "average_volume",
+                        ]
+                    )
                 )
-            )
+            else:
+                usable = (
+                    get_usable_dataframe(
+                        candles
+                    )
+                )
 
             lookback = min(
                 6,

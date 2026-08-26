@@ -493,7 +493,7 @@ def scan_symbol(
 
     return result
 
-    def prepare_scanner_dataframe(
+def prepare_scanner_dataframe(
     candles: list[dict[str, Any]],
 ) -> pd.DataFrame:
     """
@@ -551,42 +551,27 @@ def scan_symbol_from_dataframe(
         "average_volume",
     ]
 
-    latest_row = dataframe.iloc[
-        index
-    ]
+    usable = (
+        dataframe
+        .iloc[: index + 1]
+        .dropna(
+            subset=required
+        )
+    )
 
-    previous_row = dataframe.iloc[
-        index - 1
-    ]
-
-    # Normally all indicators are valid after the
-    # backtest warmup. Fall back to the previous
-    # usable rows only if an unexpected NaN appears.
-    if (
-        latest_row[required].isna().any()
-        or previous_row[required].isna().any()
-    ):
-        usable = (
-            dataframe
-            .iloc[: index + 1]
-            .dropna(
-                subset=required
-            )
+    if len(usable) < 2:
+        raise ValueError(
+            "Not enough completed indicator rows "
+            "to generate a signal"
         )
 
-        if len(usable) < 2:
-            raise ValueError(
-                "Not enough completed indicator rows "
-                "to generate a signal"
-            )
+    latest_row = (
+        usable.iloc[-1]
+    )
 
-        latest_row = (
-            usable.iloc[-1]
-        )
-
-        previous_row = (
-            usable.iloc[-2]
-        )
+    previous_row = (
+        usable.iloc[-2]
+    )
 
     latest = clean_record(
         latest_row.to_dict()

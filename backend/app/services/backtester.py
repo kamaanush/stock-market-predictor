@@ -5,7 +5,10 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from .pipeline_service import build_pipeline_analysis
-from .scanner import scan_symbol
+from .scanner import (
+    prepare_scanner_dataframe,
+    scan_symbol_from_dataframe,
+)
 
 
 DEFAULT_INITIAL_CAPITAL = 100000.0
@@ -833,6 +836,19 @@ def run_backtest(
     if slippage_bps < 0:
         raise ValueError("slippage_bps cannot be negative")
 
+    prepared_dataframe = (
+        prepare_scanner_dataframe(
+            candles
+        )
+    )
+
+    if len(prepared_dataframe) != len(candles):
+        raise ValueError(
+            "Historical candle cleaning changed "
+            "the candle count; cannot safely "
+            "preserve backtest indexes"
+        )
+
     trades: list[BacktestTrade] = []
     setups = 0
     final_index = len(candles) - max_hold_bars
@@ -843,18 +859,29 @@ def run_backtest(
         if index <= blocked_until_index:
             continue
 
-        # LOOK-AHEAD PROTECTION: scanner/pipeline only see candles available
-        # at this historical point.
-        historical_candles = candles[: index + 1]
+        # Indicators were calculated once for speed.
+        # Only the current/past row is read here.
+        scanner_result = (
+            scan_symbol_from_dataframe(
+                symbol=symbol,
+                dataframe=prepared_dataframe,
+                index=index,
+            )
+        )
 
-        scanner_result = scan_symbol(
-            symbol=symbol,
-            candles=historical_candles,
+        # Preserve the exact historical candle window
+        # used by the original backtester.
+        historical_candles = (
+            candles[: index + 1]
         )
 
         pipeline = build_pipeline_analysis(
             result=scanner_result,
             candles=historical_candles,
+            prepared_dataframe=(
+                prepared_dataframe
+            ),
+            prepared_index=index,
         )
 
         signal = _get_signal(pipeline)
