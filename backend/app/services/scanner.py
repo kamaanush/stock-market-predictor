@@ -122,6 +122,112 @@ def calculate_indicators(
 
     result["vwap"] = Indicators.vwap(result)
 
+    # ------------------------------------------------------
+    # PREVIOUS NSE TRADING SESSION OHLC
+    #
+    # CPR for an intraday candle must use the completed
+    # previous trading day's High / Low / Close.
+    # ------------------------------------------------------
+
+    numeric_time = pd.to_numeric(
+        result["time"],
+        errors="coerce",
+    )
+
+    timestamps = pd.to_datetime(
+        numeric_time,
+        unit="s",
+        utc=True,
+        errors="coerce",
+    )
+
+    fallback_timestamps = pd.to_datetime(
+        result["time"],
+        utc=True,
+        errors="coerce",
+    )
+
+    timestamps = timestamps.fillna(
+        fallback_timestamps
+    )
+
+    session_date = (
+        timestamps
+        .dt
+        .tz_convert(
+            "Asia/Kolkata"
+        )
+        .dt
+        .date
+    )
+
+    daily_source = pd.DataFrame(
+        {
+            "session_date":
+                session_date,
+
+            "high":
+                result["high"],
+
+            "low":
+                result["low"],
+
+            "close":
+                result["close"],
+        },
+        index=result.index,
+    )
+
+    daily_ohlc = (
+        daily_source
+        .groupby(
+            "session_date",
+            sort=True,
+        )
+        .agg(
+            high=(
+                "high",
+                "max",
+            ),
+            low=(
+                "low",
+                "min",
+            ),
+            close=(
+                "close",
+                "last",
+            ),
+        )
+    )
+
+    previous_daily_ohlc = (
+        daily_ohlc.shift(1)
+    )
+
+    result[
+        "previous_day_high"
+    ] = session_date.map(
+        previous_daily_ohlc[
+            "high"
+        ]
+    )
+
+    result[
+        "previous_day_low"
+    ] = session_date.map(
+        previous_daily_ohlc[
+            "low"
+        ]
+    )
+
+    result[
+        "previous_day_close"
+    ] = session_date.map(
+        previous_daily_ohlc[
+            "close"
+        ]
+    )
+
     result["atr"] = Indicators.atr(
         result,
         period=14,
@@ -288,9 +394,9 @@ def scan_symbol(
     )
     
     cpr = calculate_cpr(
-    previous_high=previous["high"],
-    previous_low=previous["low"],
-    previous_close=previous["close"],
+    previous_high=latest["previous_day_high"],
+    previous_low=latest["previous_day_low"],
+    previous_close=latest["previous_day_close"],
     current_price=latest["close"],
 )
 
@@ -582,9 +688,9 @@ def scan_symbol_from_dataframe(
     )
 
     cpr = calculate_cpr(
-        previous_high=previous["high"],
-        previous_low=previous["low"],
-        previous_close=previous["close"],
+        previous_high=latest["previous_day_high"],
+        previous_low=latest["previous_day_low"],
+        previous_close=latest["previous_day_close"],
         current_price=latest["close"],
     )
 

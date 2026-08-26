@@ -84,26 +84,76 @@ class Indicators:
     def vwap(
         dataframe: pd.DataFrame,
     ) -> pd.Series:
+        """
+        Intraday VWAP.
+
+        VWAP resets at the start of each
+        NSE trading session instead of
+        accumulating across multiple days.
+        """
+
         typical_price = (
             dataframe["high"]
             + dataframe["low"]
             + dataframe["close"]
         ) / 3
 
-        volume = dataframe["volume"].fillna(0)
+        volume = (
+            dataframe["volume"]
+            .fillna(0)
+        )
 
-        cumulative_volume = volume.cumsum().replace(
-            0,
-            np.nan,
+        timestamps = pd.to_datetime(
+            dataframe["time"],
+            unit="s",
+            utc=True,
+            errors="coerce",
+        )
+
+        session_date = (
+            timestamps
+            .dt
+            .tz_convert(
+                "Asia/Kolkata"
+            )
+            .dt
+            .date
+        )
+
+        traded_value = (
+            typical_price
+            * volume
+        )
+
+        cumulative_volume = (
+            volume
+            .groupby(
+                session_date
+            )
+            .cumsum()
+            .replace(
+                0,
+                np.nan,
+            )
         )
 
         cumulative_value = (
-            typical_price * volume
-        ).cumsum()
+            traded_value
+            .groupby(
+                session_date
+            )
+            .cumsum()
+        )
 
-        vwap = cumulative_value / cumulative_volume
+        vwap = (
+            cumulative_value
+            / cumulative_volume
+        )
 
-        return vwap.fillna(dataframe["close"])
+        return vwap.fillna(
+            dataframe["close"]
+        )
+
 
     @staticmethod
     def atr(

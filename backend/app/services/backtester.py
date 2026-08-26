@@ -103,6 +103,8 @@ class BacktestResult:
     risk_per_trade_percent: float
     max_position_value_percent: float
 
+    performance_breakdown: dict[str, Any]
+
     equity_curve: tuple[dict[str, Any], ...]
     monthly_returns: tuple[dict[str, Any], ...]
     trades: tuple[BacktestTrade, ...]
@@ -802,12 +804,318 @@ def _build_financial_statistics(
     }
 
 
+
+def _trade_group_statistics(
+    trades: list[BacktestTrade],
+) -> dict[str, Any]:
+    executed = [
+        trade
+        for trade in trades
+        if trade.result not in {
+            "NOT_TRIGGERED",
+            "INVALID",
+        }
+    ]
+
+    wins = sum(
+        1
+        for trade in executed
+        if trade.result in {
+            "TARGET1",
+            "TARGET2",
+        }
+    )
+
+    losses = sum(
+        1
+        for trade in executed
+        if trade.result == "STOPLOSS"
+    )
+
+    breakeven = sum(
+        1
+        for trade in executed
+        if trade.result == "BREAKEVEN"
+    )
+
+    unresolved = sum(
+        1
+        for trade in executed
+        if trade.result == "UNRESOLVED"
+    )
+
+    resolved = wins + losses
+
+    win_rate = (
+        round(
+            wins / resolved * 100.0,
+            2,
+        )
+        if resolved
+        else 0.0
+    )
+
+    net_pnl = round(
+        sum(
+            trade.net_pnl
+            for trade in executed
+        ),
+        2,
+    )
+
+    gross_pnl = round(
+        sum(
+            trade.gross_pnl
+            for trade in executed
+        ),
+        2,
+    )
+
+    charges = round(
+        sum(
+            trade.charges
+            for trade in executed
+        ),
+        2,
+    )
+
+    expectancy = (
+        round(
+            net_pnl / len(executed),
+            2,
+        )
+        if executed
+        else 0.0
+    )
+
+    positive = sum(
+        trade.net_pnl
+        for trade in executed
+        if trade.net_pnl > 0
+    )
+
+    negative = abs(
+        sum(
+            trade.net_pnl
+            for trade in executed
+            if trade.net_pnl < 0
+        )
+    )
+
+    net_profit_factor = (
+        round(
+            positive / negative,
+            3,
+        )
+        if negative > 0
+        else None
+    )
+
+    average_r = (
+        round(
+            sum(
+                trade.r_multiple
+                for trade in executed
+            )
+            / len(executed),
+            3,
+        )
+        if executed
+        else 0.0
+    )
+
+    return {
+        "trades": len(executed),
+        "wins": wins,
+        "losses": losses,
+        "breakeven": breakeven,
+        "unresolved": unresolved,
+        "win_rate": win_rate,
+        "gross_pnl": gross_pnl,
+        "charges": charges,
+        "net_pnl": net_pnl,
+        "expectancy": expectancy,
+        "net_profit_factor": (
+            net_profit_factor
+        ),
+        "average_r": average_r,
+    }
+
+
+def _build_performance_breakdown(
+    trades: list[BacktestTrade],
+) -> dict[str, Any]:
+
+    by_signal: dict[str, Any] = {}
+
+    for signal in [
+        "BUY",
+        "SELL",
+    ]:
+        grouped = [
+            trade
+            for trade in trades
+            if trade.signal == signal
+        ]
+
+        by_signal[signal] = (
+            _trade_group_statistics(
+                grouped
+            )
+        )
+
+    confidence_ranges = {
+        "60-69": (60, 69),
+        "70-79": (70, 79),
+        "80-89": (80, 89),
+        "90+": (90, 100),
+    }
+
+    by_confidence: dict[str, Any] = {}
+
+    for label, bounds in (
+        confidence_ranges.items()
+    ):
+        low, high = bounds
+
+        grouped = [
+            trade
+            for trade in trades
+            if (
+                low
+                <= trade.confidence
+                <= high
+            )
+        ]
+
+        by_confidence[label] = (
+            _trade_group_statistics(
+                grouped
+            )
+        )
+
+    by_grade: dict[str, Any] = {}
+
+    known_grades = [
+        "A+",
+        "A",
+        "B",
+        "C",
+        "D",
+    ]
+
+    discovered_grades = sorted(
+        {
+            str(trade.grade)
+            for trade in trades
+        }
+    )
+
+    all_grades = (
+        known_grades
+        + [
+            grade
+            for grade in discovered_grades
+            if grade not in known_grades
+        ]
+    )
+
+    for grade in all_grades:
+        grouped = [
+            trade
+            for trade in trades
+            if str(trade.grade) == grade
+        ]
+
+        by_grade[grade] = (
+            _trade_group_statistics(
+                grouped
+            )
+        )
+
+    by_signal_confidence: dict[str, Any] = {}
+
+    for signal in [
+        "BUY",
+        "SELL",
+    ]:
+        by_signal_confidence[signal] = {}
+
+        for label, bounds in (
+            confidence_ranges.items()
+        ):
+            low, high = bounds
+
+            grouped = [
+                trade
+                for trade in trades
+                if (
+                    trade.signal == signal
+                    and low
+                    <= trade.confidence
+                    <= high
+                )
+            ]
+
+            by_signal_confidence[
+                signal
+            ][label] = (
+                _trade_group_statistics(
+                    grouped
+                )
+            )
+
+    by_signal_grade: dict[str, Any] = {}
+
+    for signal in [
+        "BUY",
+        "SELL",
+    ]:
+        by_signal_grade[signal] = {}
+
+        for grade in all_grades:
+            grouped = [
+                trade
+                for trade in trades
+                if (
+                    trade.signal == signal
+                    and str(
+                        trade.grade
+                    ) == grade
+                )
+            ]
+
+            by_signal_grade[
+                signal
+            ][grade] = (
+                _trade_group_statistics(
+                    grouped
+                )
+            )
+
+    return {
+        "by_signal": by_signal,
+        "by_confidence": (
+            by_confidence
+        ),
+        "by_grade": by_grade,
+        "by_signal_confidence": (
+            by_signal_confidence
+        ),
+        "by_signal_grade": (
+            by_signal_grade
+        ),
+    }
+
+
 def run_backtest(
     *,
     symbol: str,
     timeframe: str,
     candles: list[dict[str, Any]],
     minimum_confidence: int = 60,
+    minimum_grade: Optional[str] = None,
+    signal_filter: Optional[str] = None,
     warmup_bars: int = 60,
     max_hold_bars: int = 12,
     initial_capital: float = DEFAULT_INITIAL_CAPITAL,
@@ -835,6 +1143,49 @@ def run_backtest(
 
     if slippage_bps < 0:
         raise ValueError("slippage_bps cannot be negative")
+
+    grade_rank = {
+        "D": 1,
+        "C": 2,
+        "B": 3,
+        "A": 4,
+        "A+": 5,
+    }
+
+    normalized_signal_filter = None
+
+    if signal_filter is not None:
+        normalized_signal_filter = (
+            str(signal_filter)
+            .strip()
+            .upper()
+        )
+
+        if normalized_signal_filter not in {
+            "BUY",
+            "SELL",
+        }:
+            raise ValueError(
+                "signal_filter must be BUY or SELL"
+            )
+
+    normalized_minimum_grade = None
+
+    if minimum_grade is not None:
+        normalized_minimum_grade = (
+            str(minimum_grade)
+            .strip()
+            .upper()
+        )
+
+        if (
+            normalized_minimum_grade
+            not in grade_rank
+        ):
+            raise ValueError(
+                "minimum_grade must be "
+                "D, C, B, A, or A+"
+            )
 
     prepared_dataframe = (
         prepare_scanner_dataframe(
@@ -896,6 +1247,14 @@ def run_backtest(
         if scanner_signal != signal:
             continue
 
+        if (
+            normalized_signal_filter
+            is not None
+            and signal
+            != normalized_signal_filter
+        ):
+            continue
+
         setups += 1
 
         confidence = _get_master_confidence(pipeline)
@@ -903,6 +1262,20 @@ def run_backtest(
             continue
 
         grade = _get_master_grade(pipeline)
+
+        if (
+            normalized_minimum_grade
+            is not None
+            and grade_rank.get(
+                str(grade).upper(),
+                0,
+            )
+            < grade_rank[
+                normalized_minimum_grade
+            ]
+        ):
+            continue
+
         entry, stoploss, target1, target2 = _extract_trade_plan(scanner_result)
 
         if entry is None or stoploss is None or target1 is None or target2 is None:
@@ -998,6 +1371,12 @@ def run_backtest(
         initial_capital=initial_capital,
     )
 
+    performance_breakdown = (
+        _build_performance_breakdown(
+            trades
+        )
+    )
+
     return BacktestResult(
         symbol=symbol.upper(),
         timeframe=timeframe,
@@ -1034,6 +1413,7 @@ def run_backtest(
         slippage_bps=round(slippage_bps, 2),
         risk_per_trade_percent=round(risk_per_trade_pct, 2),
         max_position_value_percent=round(max_position_value_pct, 2),
+        performance_breakdown=performance_breakdown,
         equity_curve=financials["equity_curve"],
         monthly_returns=financials["monthly_returns"],
         trades=tuple(trades),

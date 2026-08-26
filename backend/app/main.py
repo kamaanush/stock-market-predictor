@@ -634,7 +634,10 @@ async def backtest_symbol(
     symbol: str,
     interval: str = "5m",
     minimum_confidence: int = 60,
+    minimum_grade: Optional[str] = None,
+    signal_filter: Optional[str] = None,
     days: Optional[int] = None,
+    offset_days: int = 0,
     session: AsyncSession = Depends(get_session),
 ):
     if interval not in {
@@ -679,21 +682,89 @@ async def backtest_symbol(
             detail="days must be at least 1",
         )
 
+    if offset_days < 0:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "offset_days cannot be negative"
+            ),
+        )
+
     try:
         provider = market()
 
-        candles = await provider.historical_candles(
-            instrument.symbol,
-            interval,
-            instrument.token,
-            days=history_days,
+        fetch_days = (
+            history_days
+            + offset_days
         )
+
+        fetched_candles = (
+            await provider.historical_candles(
+                instrument.symbol,
+                interval,
+                instrument.token,
+                days=fetch_days,
+            )
+        )
+
+        candles = fetched_candles
+
+        if offset_days > 0:
+            seconds_per_day = 86400
+
+            valid_times = [
+                int(candle["time"])
+                for candle in fetched_candles
+                if candle.get("time")
+                is not None
+            ]
+
+            if not valid_times:
+                raise ValueError(
+                    "Historical candles "
+                    "have no timestamps"
+                )
+
+            latest_time = max(
+                valid_times
+            )
+
+            window_end = (
+                latest_time
+                - (
+                    offset_days
+                    * seconds_per_day
+                )
+            )
+
+            window_start = (
+                window_end
+                - (
+                    history_days
+                    * seconds_per_day
+                )
+            )
+
+            candles = [
+                candle
+                for candle
+                in fetched_candles
+                if (
+                    window_start
+                    <= int(
+                        candle["time"]
+                    )
+                    <= window_end
+                )
+            ]
 
         result = run_backtest(
             symbol=instrument.symbol,
             timeframe=interval,
             candles=candles,
             minimum_confidence=minimum_confidence,
+            minimum_grade=minimum_grade,
+            signal_filter=signal_filter,
             warmup_bars=60,
             max_hold_bars=12,
         )
@@ -704,6 +775,10 @@ async def backtest_symbol(
 
         response["requested_days"] = (
             history_days
+        )
+
+        response["offset_days"] = (
+            offset_days
         )
 
         response["market_mode"] = (
