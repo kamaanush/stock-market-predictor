@@ -114,31 +114,67 @@ export default function ScannerPanel({
   onSelectSymbol,
   onOpenChart,
 }: ScannerPanelProps) {
-  const ranked = useMemo(() => {
+  const allRanked = useMemo(() => {
     return Object.values(scanners)
-      .sort((a, b) => b.analysis.confidence - a.analysis.confidence)
-      .slice(0, 8);
+      .sort(
+        (a, b) =>
+          b.analysis.confidence -
+          a.analysis.confidence
+      );
   }, [scanners]);
 
+  const ranked = useMemo(
+    () =>
+      allRanked.slice(
+        0,
+        8
+      ),
+    [allRanked]
+  );
+
   const selectedScanner =
-    scanners[selected] ?? ranked[0] ?? undefined;
+    scanners[selected] ??
+    ranked[0] ??
+    undefined;
 
-  const buyCount = ranked.filter(
-    (item) => item.signal.toUpperCase() === "BUY"
-  ).length;
-  const sellCount = ranked.filter(
-    (item) => item.signal.toUpperCase() === "SELL"
-  ).length;
-  const waitCount = Math.max(0, ranked.length - buyCount - sellCount);
+  const buyCount =
+    allRanked.filter(
+      (item) =>
+        item.signal
+          .toUpperCase() ===
+        "BUY"
+    ).length;
 
-  const strongest = ranked[0];
+  const sellCount =
+    allRanked.filter(
+      (item) =>
+        item.signal
+          .toUpperCase() ===
+        "SELL"
+    ).length;
+
+  const waitCount =
+    Math.max(
+      0,
+      allRanked.length -
+        buyCount -
+        sellCount
+    );
+
+  const strongest =
+    ranked[0];
+
   const avgConfidence =
-    ranked.length > 0
+    allRanked.length > 0
       ? Math.round(
-          ranked.reduce(
-            (sum, item) => sum + item.analysis.confidence,
+          allRanked.reduce(
+            (sum, item) =>
+              sum +
+              item.analysis
+                .confidence,
             0
-          ) / ranked.length
+          ) /
+            allRanked.length
         )
       : 0;
 
@@ -175,7 +211,7 @@ export default function ScannerPanel({
       </header>
 
       <div className={styles.statsRow}>
-        <Metric label="Analyzed" value={String(ranked.length)} accent="cyan" />
+        <Metric label="Deep analyzed" value={String(allRanked.length)} accent="cyan" />
         <Metric label="Buy setups" value={String(buyCount)} accent="green" />
         <Metric label="Sell setups" value={String(sellCount)} accent="red" />
         <Metric label="Avg confidence" value={`${avgConfidence}%`} accent="violet" />

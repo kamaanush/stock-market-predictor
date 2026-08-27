@@ -1175,7 +1175,20 @@ export default function Dashboard() {
   );
 
   // ==================================================
-  // V2 SCANNER
+  // AUTOMATIC BACKEND DEEP SCANNER
+  //
+  // Browser no longer loops through every symbol.
+  //
+  // Backend:
+  // ALL TRACKED STOCKS
+  //      ↓
+  // FAST SCAN
+  //      ↓
+  // DYNAMIC TOP 30
+  //      ↓
+  // DEEP V2 SCAN
+  //
+  // Frontend only reads the latest results.
   // ==================================================
 
   useEffect(
@@ -1183,12 +1196,9 @@ export default function Dashboard() {
 
       if (
         !preferencesLoaded ||
-        !scannerSymbolsKey ||
         authenticated !== true
       ) {
-
         return;
-
       }
 
 
@@ -1196,255 +1206,138 @@ export default function Dashboard() {
         true;
 
 
-      let nextScanTimer:
-        number | null =
-        null;
+      let timer: number | null = null;
 
 
-      function sleep(
-        milliseconds:
-          number
-      ) {
-
-        return new Promise<void>(
-          (
-            resolve
-          ) => {
-
-            window.setTimeout(
-              resolve,
-              milliseconds
-            );
-
-          }
-        );
-
-      }
-
-
-      async function scanUniverse() {
-
-
-        const symbols =
-          scannerSymbolsKey
-            .split(",")
-            .map(
-              (
-                symbol
-              ) =>
-                symbol
-                  .trim()
-                  .toUpperCase()
-            )
-            .filter(
-              Boolean
-            );
-
+      async function loadDeepScanner() {
 
         if (
-          symbols.length ===
-          0
+          !active
         ) {
-
           return;
-
         }
 
 
-        if (
-          active
-        ) {
-
-          setScannerLoading(
-            true
-          );
-
-        }
+        setScannerLoading(
+          true
+        );
 
 
         try {
 
+          const response =
+            await fetch(
+              `${API_BASE}/api/v2/deep-scan?limit=30`,
+              {
+                credentials:
+                  "include",
 
-          for (
-            const symbol
-            of symbols
+                cache:
+                  "no-store",
+              }
+            );
+
+
+          if (
+            response.status ===
+            401
           ) {
-
-
-            if (
-              !active
-            ) {
-
-              return;
-
-            }
-
-
-            try {
-
-
-              const response =
-                await fetch(
-                  `${API_BASE}/api/v2/scanner/${encodeURIComponent(
-                    symbol
-                  )}?interval=${scannerTimeframe}`,
-                  {
-
-                    credentials:
-                      "include",
-
-                    cache:
-                      "no-store",
-
-                  }
-                );
-
-
-              if (
-                response.status ===
-                401
-              ) {
-
-
-                if (
-                  active
-                ) {
-
-                  setAuthenticated(
-                    false
-                  );
-
-                }
-
-
-                return;
-
-              }
-
-
-              if (
-                !response.ok
-              ) {
-
-
-                const body =
-                  await response
-                    .json()
-                    .catch(
-                      () => ({})
-                    );
-
-
-                throw new Error(
-                  body.detail ||
-                  `${symbol}: scanner failed`
-                );
-
-              }
-
-
-              const data:
-                ScannerResult =
-                await response
-                  .json();
-
-
-              if (
-                !active
-              ) {
-
-                return;
-
-              }
-
-
-              setScanners(
-                (
-                  previous
-                ) => ({
-
-                  ...previous,
-
-                  [
-                    data.symbol
-                      .toUpperCase()
-                  ]:
-                    data,
-
-                })
-              );
-
-
-            } catch (
-            error
-            ) {
-
-              const errorMessage =
-                error instanceof Error
-                  ? error.message
-                  : String(
-                    error
-                  );
-
-
-              const isCandleIssue =
-                errorMessage
-                  .toLowerCase()
-                  .includes(
-                    "candle"
-                  );
-
-
-              if (
-                isCandleIssue
-              ) {
-
-                /*
-                 * Insufficient candles are
-                 * not an application crash.
-                 *
-                 * This can happen with
-                 * newly listed, invalid,
-                 * suspended or temporarily
-                 * unavailable instruments.
-                 */
-                console.warn(
-                  `[NEXUS scanner] skipped ${symbol}: ${errorMessage}`
-                );
-
-              } else {
-
-                console.error(
-                  `[NEXUS scanner] ${symbol}`,
-                  error
-                );
-
-              }
-
-            }
-
 
             if (
               active
             ) {
-
-              /*
-               * Keep Angel One
-               * scanner requests
-               * spaced apart.
-               */
-              await sleep(
-                2500
+              setAuthenticated(
+                false
               );
-
             }
 
-
+            return;
           }
 
 
-        } finally {
+          if (
+            !response.ok
+          ) {
 
+            const body =
+              await response
+                .json()
+                .catch(
+                  () => ({})
+                );
+
+
+            throw new Error(
+              body.detail ||
+              "Unable to load automatic scanner"
+            );
+          }
+
+
+          const data:
+            {
+              status?: string;
+
+              results?: Array<{
+                symbol: string;
+                deep: ScannerResult;
+              }>;
+            } =
+            await response.json();
+
+
+          if (
+            !active
+          ) {
+            return;
+          }
+
+
+          const next:
+            Record<
+              string,
+              ScannerResult
+            > = {};
+
+
+          for (
+            const item
+            of data.results || []
+          ) {
+
+            if (
+              !item.deep ||
+              !item.symbol
+            ) {
+              continue;
+            }
+
+
+            next[
+              item.symbol
+                .trim()
+                .toUpperCase()
+            ] =
+              item.deep;
+          }
+
+
+          setScanners(
+            next
+          );
+
+
+        } catch (
+        error
+        ) {
+
+          console.error(
+            "[NEXUS automatic scanner]",
+            error
+          );
+
+
+        } finally {
 
           if (
             active
@@ -1454,85 +1347,46 @@ export default function Dashboard() {
               false
             );
 
+
+            timer =
+              window.setTimeout(
+                () => {
+                  void loadDeepScanner();
+                },
+                10000
+              );
           }
-
-
         }
-
-
       }
 
 
-      async function runScannerCycle() {
-
-
-        await scanUniverse();
-
-
-        if (
-          !active
-        ) {
-
-          return;
-
-        }
-
-
-        /*
-         * Start another complete
-         * scan after one minute.
-         *
-         * setTimeout is used
-         * instead of setInterval
-         * so scans cannot overlap.
-         */
-        nextScanTimer =
-          window.setTimeout(
-            () => {
-
-              void runScannerCycle();
-
-            },
-            60000
-          );
-
-
-      }
-
-
-      void runScannerCycle();
+      void loadDeepScanner();
 
 
       return () => {
-
 
         active =
           false;
 
 
         if (
-          nextScanTimer !==
+          timer !==
           null
         ) {
 
           window.clearTimeout(
-            nextScanTimer
+            timer
           );
-
         }
-
-
       };
-
 
     },
     [
       authenticated,
-      scannerTimeframe,
-      scannerSymbolsKey,
       preferencesLoaded,
     ]
   );
+
 
   // ==================================================
   // DATABASE WATCHLIST

@@ -67,8 +67,13 @@ from .services.backtester import (
 )
 from .services.live_market import LiveMarketTracker
 from .services.live_candles import LiveCandleEngine
-from .services.live_market import LiveMarketTracker
-from .services.live_candles import LiveCandleEngine
+from .services.fast_scanner import (
+    build_fast_scan_snapshot,
+)
+
+from .services.instrument_master import (
+    refresh_instrument_master,
+)
 
 from .services.candle_history import (
     latest_candle_time,
@@ -88,11 +93,105 @@ async def lifespan(app: FastAPI):
     await initialize_database()
     await seed_demo_instruments()
 
+    # -------------------------------------------------
+    # REFRESH NSE INSTRUMENT MASTER
+    #
+    # This keeps recently listed stocks / IPOs
+    # searchable without manual database updates.
+    #
+    # Failure here must NOT prevent NEXUS starting.
+    # -------------------------------------------------
+
+    app.state.instrument_master = {
+        "status": "STARTING",
+        "imported": 0,
+        "refreshed_at": None,
+        "error": None,
+    }
+
+    try:
+
+        async with SessionLocal() as session:
+
+            refresh_result = (
+                await refresh_instrument_master(
+                    session
+                )
+            )
+
+        app.state.instrument_master = {
+            "status": "READY",
+
+            "imported": int(
+                refresh_result.get(
+                    "imported",
+                    0,
+                )
+            ),
+
+            "refreshed_at":
+                refresh_result.get(
+                    "refreshed_at"
+                ),
+
+            "error": None,
+        }
+
+        print(
+            "INSTRUMENT MASTER REFRESHED:",
+            app.state
+            .instrument_master[
+                "imported"
+            ],
+            "instruments",
+        )
+
+    except Exception as exc:
+
+        app.state.instrument_master = {
+            "status": "ERROR",
+            "imported": 0,
+            "refreshed_at": None,
+            "error": str(exc),
+        }
+
+        print(
+            "INSTRUMENT MASTER "
+            "STARTUP REFRESH FAILED:",
+            exc,
+        )
+
+
     app.state.live_market = None
 
-    app.state.live_candles = LiveCandleEngine(
-    max_candles=500
-     )
+    app.state.live_candles = (
+        LiveCandleEngine(
+            max_candles=500
+        )
+    )
+
+    app.state.fast_scan_snapshot = {
+        "generated_at": None,
+        "live_count": 0,
+        "scored_count": 0,
+        "warming_up_count": 0,
+        "bullish_count": 0,
+        "bearish_count": 0,
+        "neutral_count": 0,
+        "results": [],
+    }
+
+    app.state.deep_scan_snapshot = {
+        "generated_at": None,
+        "status": "STARTING",
+        "interval": "15m",
+        "candidate_count": 0,
+        "urgent_candidate_count": 0,
+        "analyzed_count": 0,
+        "error_count": 0,
+        "errors": [],
+        "results": [],
+    }
 
     try:
         app.state.market = create_market_data(
@@ -266,6 +365,30 @@ async def lifespan(app: FastAPI):
         alert_worker_loop(app)
     )
 
+    instrument_master_worker = (
+        asyncio.create_task(
+            instrument_master_worker_loop(
+                app
+            )
+        )
+    )
+
+    fast_scanner_worker = (
+        asyncio.create_task(
+            fast_scanner_worker_loop(
+                app
+            )
+        )
+    )
+
+    deep_scanner_worker = (
+        asyncio.create_task(
+            deep_scanner_worker_loop(
+                app
+            )
+        )
+    )
+
     try:
         yield
 
@@ -281,11 +404,29 @@ async def lifespan(app: FastAPI):
             live_market.stop()
 
         alert_worker.cancel()
+        instrument_master_worker.cancel()
+        fast_scanner_worker.cancel()
+        deep_scanner_worker.cancel()
 
         with suppress(
             asyncio.CancelledError
         ):
             await alert_worker
+
+        with suppress(
+            asyncio.CancelledError
+        ):
+            await instrument_master_worker
+
+        with suppress(
+            asyncio.CancelledError
+        ):
+            await fast_scanner_worker
+
+        with suppress(
+            asyncio.CancelledError
+        ):
+            await deep_scanner_worker
 
 
 async def seed_demo_instruments() -> None:
@@ -321,6 +462,1182 @@ async def seed_demo_instruments() -> None:
                 )
 
         await session.commit()
+
+
+async def fast_scanner_worker_loop(
+    app: FastAPI,
+) -> None:
+    """
+    Continuously rank the complete live
+    scan universe using only local
+    WebSocket data and locally built
+    candles.
+
+    This does NOT call Angel One
+    historical APIs.
+    """
+
+    while True:
+        try:
+            live_market = getattr(
+                app.state,
+                "live_market",
+                None,
+            )
+
+            candle_engine = getattr(
+                app.state,
+                "live_candles",
+                None,
+            )
+
+            if (
+                live_market is not None
+                and candle_engine
+                is not None
+            ):
+                ticks = (
+                    live_market.snapshot()
+                )
+
+                app.state.fast_scan_snapshot = (
+                    build_fast_scan_snapshot(
+                        ticks=ticks,
+                        candle_engine=(
+                            candle_engine
+                        ),
+                    )
+                )
+
+        except Exception as exc:
+            print(
+                "[FAST SCANNER WORKER]",
+                exc,
+            )
+
+        await asyncio.sleep(
+            5
+        )
+
+
+def _scanner_model_to_dict(
+    value: Any,
+) -> dict[str, Any]:
+
+    if hasattr(
+        value,
+        "model_dump",
+    ):
+        return value.model_dump()
+
+    if hasattr(
+        value,
+        "dict",
+    ):
+        return value.dict()
+
+    if isinstance(
+        value,
+        dict,
+    ):
+        return dict(value)
+
+    raise TypeError(
+        "Unsupported scanner result"
+    )
+
+
+def _nse_market_window() -> bool:
+    """
+    Basic weekday NSE cash-market window.
+
+    Exchange holidays naturally produce
+    no meaningful live ticks.
+    """
+
+    now = datetime.now(
+        IST
+    )
+
+    if now.weekday() >= 5:
+        return False
+
+    minute_of_day = (
+        now.hour * 60
+        + now.minute
+    )
+
+    market_open = (
+        9 * 60
+        + 15
+    )
+
+    market_close = (
+        15 * 60
+        + 30
+    )
+
+    return (
+        market_open
+        <= minute_of_day
+        <= market_close
+    )
+
+
+def _sudden_mover_reason(
+    item: dict[str, Any],
+) -> Optional[str]:
+    """
+    Detect unusual short-term activity.
+
+    IMPORTANT:
+    These are PRIORITY thresholds only.
+
+    They are NOT BUY / SELL rules and
+    they do not determine trade confidence.
+    """
+
+    try:
+        change_1m = float(
+            item.get(
+                "change_1m_percent",
+                0,
+            )
+            or 0
+        )
+
+        change_5m = float(
+            item.get(
+                "change_5m_percent",
+                0,
+            )
+            or 0
+        )
+
+        volume_ratio = float(
+            item.get(
+                "volume_ratio",
+                0,
+            )
+            or 0
+        )
+
+        breakout = float(
+            item.get(
+                "breakout_percent",
+                0,
+            )
+            or 0
+        )
+
+    except (
+        TypeError,
+        ValueError,
+    ):
+        return None
+
+
+    # ----------------------------------------
+    # VERY FAST 1-MINUTE MOVE
+    # ----------------------------------------
+
+    if abs(
+        change_1m
+    ) >= 0.60:
+
+        return (
+            "1m sudden move "
+            f"{change_1m:+.2f}%"
+        )
+
+
+    # ----------------------------------------
+    # STRONG 5-MINUTE ACCELERATION
+    # ----------------------------------------
+
+    if abs(
+        change_5m
+    ) >= 1.20:
+
+        return (
+            "5m acceleration "
+            f"{change_5m:+.2f}%"
+        )
+
+
+    # ----------------------------------------
+    # VOLUME EXPANSION + PRICE MOVEMENT
+    # ----------------------------------------
+
+    if (
+        volume_ratio >= 2.50
+        and
+        abs(
+            change_1m
+        ) >= 0.15
+    ):
+
+        return (
+            "volume surge "
+            f"{volume_ratio:.1f}x "
+            "with "
+            f"{change_1m:+.2f}% 1m"
+        )
+
+
+    # ----------------------------------------
+    # BREAKOUT / BREAKDOWN
+    # ----------------------------------------
+
+    if abs(
+        breakout
+    ) >= 0.35:
+
+        direction = (
+            "breakout"
+            if breakout > 0
+            else "breakdown"
+        )
+
+        return (
+            f"{direction} "
+            f"{breakout:+.2f}%"
+        )
+
+
+    return None
+
+
+def _ready_fast_ranked(
+    app: FastAPI,
+) -> list[dict[str, Any]]:
+
+    fast_snapshot = getattr(
+        app.state,
+        "fast_scan_snapshot",
+        {},
+    )
+
+    ranked = list(
+        fast_snapshot.get(
+            "results",
+            [],
+        )
+    )
+
+    return [
+        item
+        for item in ranked
+        if (
+            item.get(
+                "status"
+            )
+            == "READY"
+        )
+    ]
+
+
+async def deep_scanner_worker_loop(
+    app: FastAPI,
+) -> None:
+    """
+    Automatic second-stage scanner.
+
+    Normal:
+        Fast ranked Top 30
+        -> Deep V2 analysis
+
+    Override:
+        Any stock in the complete universe
+        that suddenly becomes active can
+        enter the priority queue immediately.
+
+    Only one deep worker runs, which keeps
+    Angel One fallback requests controlled.
+    """
+
+    candidate_limit = 30
+
+    sudden_limit = 10
+
+    max_deep_per_cycle = (
+        candidate_limit
+        + sudden_limit
+    )
+
+    interval = "15m"
+
+
+    while True:
+
+        try:
+
+            # ======================================
+            # MARKET HOURS
+            # ======================================
+
+            if not _nse_market_window():
+
+                existing = dict(
+                    getattr(
+                        app.state,
+                        "deep_scan_snapshot",
+                        {},
+                    )
+                )
+
+                existing[
+                    "status"
+                ] = "MARKET_CLOSED"
+
+                existing[
+                    "generated_at"
+                ] = (
+                    datetime.now(
+                        timezone.utc
+                    ).isoformat()
+                )
+
+                existing[
+                    "urgent_candidate_count"
+                ] = 0
+
+                app.state.deep_scan_snapshot = (
+                    existing
+                )
+
+                await asyncio.sleep(
+                    30
+                )
+
+                continue
+
+
+            # ======================================
+            # CURRENT COMPLETE FAST RANKING
+            # ======================================
+
+            ranked = (
+                _ready_fast_ranked(
+                    app
+                )
+            )
+
+
+            if not ranked:
+
+                app.state.deep_scan_snapshot = {
+                    "generated_at": (
+                        datetime.now(
+                            timezone.utc
+                        ).isoformat()
+                    ),
+
+                    "status":
+                        "WAITING_FOR_FAST_SCAN",
+
+                    "interval":
+                        interval,
+
+                    "candidate_count":
+                        0,
+
+                    "urgent_candidate_count":
+                        0,
+
+                    "analyzed_count":
+                        0,
+
+                    "error_count":
+                        0,
+
+                    "errors":
+                        [],
+
+                    "results":
+                        [],
+                }
+
+                await asyncio.sleep(
+                    10
+                )
+
+                continue
+
+
+            # ======================================
+            # NORMAL TOP 30
+            # ======================================
+
+            normal_candidates = (
+                ranked[
+                    :candidate_limit
+                ]
+            )
+
+
+            # ======================================
+            # INITIAL SUDDEN MOVERS
+            #
+            # Search the ENTIRE universe,
+            # not just the Top 30.
+            # ======================================
+
+            sudden_candidates: list[
+                dict[str, Any]
+            ] = []
+
+            sudden_reason_by_symbol: dict[
+                str,
+                str,
+            ] = {}
+
+
+            for item in ranked:
+
+                symbol = str(
+                    item.get(
+                        "symbol",
+                        "",
+                    )
+                ).strip().upper()
+
+                if not symbol:
+                    continue
+
+                reason = (
+                    _sudden_mover_reason(
+                        item
+                    )
+                )
+
+                if reason is None:
+                    continue
+
+                sudden_candidates.append(
+                    item
+                )
+
+                sudden_reason_by_symbol[
+                    symbol
+                ] = reason
+
+                if (
+                    len(
+                        sudden_candidates
+                    )
+                    >= sudden_limit
+                ):
+                    break
+
+
+            # ======================================
+            # BUILD PRIORITY QUEUE
+            #
+            # Sudden movers first.
+            # Top 30 after them.
+            # No duplicates.
+            # ======================================
+
+            queue: list[
+                dict[str, Any]
+            ] = []
+
+            queued_symbols: set[
+                str
+            ] = set()
+
+
+            for item in (
+                sudden_candidates
+                +
+                normal_candidates
+            ):
+
+                symbol = str(
+                    item.get(
+                        "symbol",
+                        "",
+                    )
+                ).strip().upper()
+
+                if (
+                    not symbol
+                    or
+                    symbol
+                    in queued_symbols
+                ):
+                    continue
+
+                queue.append(
+                    item
+                )
+
+                queued_symbols.add(
+                    symbol
+                )
+
+
+            analyzed_symbols: set[
+                str
+            ] = set()
+
+            urgent_symbols: set[
+                str
+            ] = set(
+                sudden_reason_by_symbol.keys()
+            )
+
+            deep_results: list[
+                dict[str, Any]
+            ] = []
+
+            errors: list[
+                dict[str, Any]
+            ] = []
+
+
+            previous_snapshot = dict(
+                getattr(
+                    app.state,
+                    "deep_scan_snapshot",
+                    {},
+                )
+            )
+
+            previous_results = list(
+                previous_snapshot.get(
+                    "results",
+                    [],
+                )
+            )
+
+
+            app.state.deep_scan_snapshot = {
+                "generated_at": (
+                    datetime.now(
+                        timezone.utc
+                    ).isoformat()
+                ),
+
+                "status":
+                    "SCANNING",
+
+                "interval":
+                    interval,
+
+                "candidate_count":
+                    len(queue),
+
+                "urgent_candidate_count":
+                    len(
+                        urgent_symbols
+                    ),
+
+                "analyzed_count":
+                    0,
+
+                "error_count":
+                    0,
+
+                "errors":
+                    [],
+
+                # Keep previous results visible
+                # while a new cycle is running.
+                "results":
+                    previous_results,
+            }
+
+
+            # ======================================
+            # PROCESS PRIORITY QUEUE
+            # ======================================
+
+            while (
+                queue
+                and
+                len(
+                    analyzed_symbols
+                )
+                <
+                max_deep_per_cycle
+            ):
+
+                # ----------------------------------
+                # RE-CHECK ENTIRE MARKET BEFORE
+                # EACH DEEP ANALYSIS.
+                #
+                # This is what allows a stock that
+                # was #180 a few seconds ago to
+                # jump into the current cycle.
+                # ----------------------------------
+
+                current_ranked = (
+                    _ready_fast_ranked(
+                        app
+                    )
+                )
+
+                rank_by_symbol = {
+                    str(
+                        item.get(
+                            "symbol",
+                            "",
+                        )
+                    )
+                    .strip()
+                    .upper():
+                    index
+
+                    for index, item
+                    in enumerate(
+                        current_ranked,
+                        start=1,
+                    )
+                }
+
+
+                if (
+                    len(
+                        urgent_symbols
+                    )
+                    < sudden_limit
+                ):
+
+                    new_urgent: list[
+                        dict[str, Any]
+                    ] = []
+
+
+                    for item in current_ranked:
+
+                        symbol = str(
+                            item.get(
+                                "symbol",
+                                "",
+                            )
+                        ).strip().upper()
+
+
+                        if (
+                            not symbol
+                            or
+                            symbol
+                            in analyzed_symbols
+                            or
+                            symbol
+                            in queued_symbols
+                            or
+                            symbol
+                            in urgent_symbols
+                        ):
+                            continue
+
+
+                        reason = (
+                            _sudden_mover_reason(
+                                item
+                            )
+                        )
+
+
+                        if reason is None:
+                            continue
+
+
+                        new_urgent.append(
+                            item
+                        )
+
+                        urgent_symbols.add(
+                            symbol
+                        )
+
+                        sudden_reason_by_symbol[
+                            symbol
+                        ] = reason
+
+
+                        if (
+                            len(
+                                urgent_symbols
+                            )
+                            >= sudden_limit
+                        ):
+                            break
+
+
+                    # New sudden movers go
+                    # to the FRONT of queue.
+
+                    if new_urgent:
+
+                        for item in reversed(
+                            new_urgent
+                        ):
+
+                            symbol = str(
+                                item.get(
+                                    "symbol",
+                                    "",
+                                )
+                            ).strip().upper()
+
+                            queue.insert(
+                                0,
+                                item,
+                            )
+
+                            queued_symbols.add(
+                                symbol
+                            )
+
+
+                candidate = (
+                    queue.pop(
+                        0
+                    )
+                )
+
+                symbol = str(
+                    candidate.get(
+                        "symbol",
+                        "",
+                    )
+                ).strip().upper()
+
+                queued_symbols.discard(
+                    symbol
+                )
+
+
+                if (
+                    not symbol
+                    or
+                    symbol
+                    in analyzed_symbols
+                ):
+                    continue
+
+
+                analyzed_symbols.add(
+                    symbol
+                )
+
+
+                fast_rank = (
+                    rank_by_symbol.get(
+                        symbol
+                    )
+                )
+
+
+                if fast_rank is None:
+
+                    fast_rank = (
+                        len(
+                            current_ranked
+                        )
+                        + 1
+                    )
+
+
+                sudden_reason = (
+                    sudden_reason_by_symbol
+                    .get(
+                        symbol
+                    )
+                )
+
+
+                try:
+
+                    async with (
+                        SessionLocal()
+                    ) as session:
+
+                        scanner_model = (
+                            await scan_stock_v2(
+                                symbol=symbol,
+                                interval=interval,
+                                session=session,
+                            )
+                        )
+
+
+                    scanner_data = (
+                        _scanner_model_to_dict(
+                            scanner_model
+                        )
+                    )
+
+
+                    confidence = float(
+                        scanner_data
+                        .get(
+                            "analysis",
+                            {},
+                        )
+                        .get(
+                            "confidence",
+                            0,
+                        )
+                        or 0
+                    )
+
+
+                    deep_results.append(
+                        {
+                            "symbol":
+                                symbol,
+
+                            "priority": (
+                                "SUDDEN"
+                                if sudden_reason
+                                else "NORMAL"
+                            ),
+
+                            "trigger_reason":
+                                sudden_reason,
+
+                            "fast_rank":
+                                fast_rank,
+
+                            "fast_score":
+                                float(
+                                    candidate.get(
+                                        "fast_score",
+                                        0,
+                                    )
+                                    or 0
+                                ),
+
+                            "fast_direction":
+                                candidate.get(
+                                    "direction",
+                                    "NEUTRAL",
+                                ),
+
+                            "change_1m_percent":
+                                candidate.get(
+                                    "change_1m_percent",
+                                    0,
+                                ),
+
+                            "change_5m_percent":
+                                candidate.get(
+                                    "change_5m_percent",
+                                    0,
+                                ),
+
+                            "volume_ratio":
+                                candidate.get(
+                                    "volume_ratio",
+                                    0,
+                                ),
+
+                            "deep_confidence":
+                                confidence,
+
+                            "deep":
+                                scanner_data,
+                        }
+                    )
+
+
+                except HTTPException as exc:
+
+                    errors.append(
+                        {
+                            "symbol":
+                                symbol,
+
+                            "status_code":
+                                exc.status_code,
+
+                            "error":
+                                str(
+                                    exc.detail
+                                ),
+                        }
+                    )
+
+
+                except Exception as exc:
+
+                    errors.append(
+                        {
+                            "symbol":
+                                symbol,
+
+                            "status_code":
+                                500,
+
+                            "error":
+                                str(
+                                    exc
+                                ),
+                        }
+                    )
+
+
+                # ----------------------------------
+                # PUBLISH PARTIAL RESULTS
+                # ----------------------------------
+
+                partial_results = sorted(
+                    deep_results,
+                    key=lambda item: (
+                        item.get(
+                            "deep_confidence",
+                            0,
+                        )
+                    ),
+                    reverse=True,
+                )
+
+
+                for (
+                    index,
+                    item,
+                ) in enumerate(
+                    partial_results,
+                    start=1,
+                ):
+                    item[
+                        "deep_rank"
+                    ] = index
+
+
+                app.state.deep_scan_snapshot = {
+                    "generated_at": (
+                        datetime.now(
+                            timezone.utc
+                        ).isoformat()
+                    ),
+
+                    "status":
+                        "SCANNING",
+
+                    "interval":
+                        interval,
+
+                    "candidate_count":
+                        (
+                            len(
+                                analyzed_symbols
+                            )
+                            +
+                            len(queue)
+                        ),
+
+                    "urgent_candidate_count":
+                        len(
+                            urgent_symbols
+                        ),
+
+                    "analyzed_count":
+                        len(
+                            deep_results
+                        ),
+
+                    "error_count":
+                        len(
+                            errors
+                        ),
+
+                    "errors":
+                        list(
+                            errors
+                        ),
+
+                    "results":
+                        partial_results,
+                }
+
+
+                # ----------------------------------
+                # RATE-LIMIT PROTECTION
+                # ----------------------------------
+
+                await asyncio.sleep(
+                    2.5
+                )
+
+
+            # ======================================
+            # FINAL RANKING
+            # ======================================
+
+            deep_results.sort(
+                key=lambda item: (
+                    item.get(
+                        "deep_confidence",
+                        0,
+                    )
+                ),
+                reverse=True,
+            )
+
+
+            for (
+                index,
+                item,
+            ) in enumerate(
+                deep_results,
+                start=1,
+            ):
+
+                item[
+                    "deep_rank"
+                ] = index
+
+
+            app.state.deep_scan_snapshot = {
+                "generated_at": (
+                    datetime.now(
+                        timezone.utc
+                    ).isoformat()
+                ),
+
+                "status":
+                    "READY",
+
+                "interval":
+                    interval,
+
+                "candidate_count":
+                    len(
+                        analyzed_symbols
+                    ),
+
+                "urgent_candidate_count":
+                    len(
+                        urgent_symbols
+                    ),
+
+                "analyzed_count":
+                    len(
+                        deep_results
+                    ),
+
+                "error_count":
+                    len(
+                        errors
+                    ),
+
+                "errors":
+                    errors,
+
+                "results":
+                    deep_results,
+            }
+
+
+        except Exception as exc:
+
+            print(
+                "[DEEP SCANNER WORKER]",
+                exc,
+            )
+
+
+        await asyncio.sleep(
+            30
+        )
+
+
+async def instrument_master_worker_loop(
+    app: FastAPI,
+) -> None:
+    """
+    Refresh the NSE catalogue periodically while
+    the backend remains running.
+
+    Startup already performs an immediate refresh.
+    This worker handles long-running backend
+    sessions across future trading days.
+    """
+
+    while True:
+
+        # Six hours is intentionally conservative:
+        # instrument metadata changes far less
+        # frequently than market prices.
+
+        await asyncio.sleep(
+            6 * 60 * 60
+        )
+
+        try:
+
+            async with SessionLocal() as session:
+
+                result = (
+                    await refresh_instrument_master(
+                        session
+                    )
+                )
+
+
+            app.state.instrument_master = {
+                "status": "READY",
+
+                "imported": int(
+                    result.get(
+                        "imported",
+                        0,
+                    )
+                ),
+
+                "refreshed_at":
+                    result.get(
+                        "refreshed_at"
+                    ),
+
+                "error": None,
+            }
+
+
+            print(
+                "INSTRUMENT MASTER "
+                "AUTO REFRESHED:",
+                app.state
+                .instrument_master[
+                    "imported"
+                ],
+                "instruments",
+            )
+
+
+        except Exception as exc:
+
+            previous = dict(
+                getattr(
+                    app.state,
+                    "instrument_master",
+                    {},
+                )
+            )
+
+            previous[
+                "status"
+            ] = "ERROR"
+
+            previous[
+                "error"
+            ] = str(exc)
+
+            app.state.instrument_master = (
+                previous
+            )
+
+            print(
+                "INSTRUMENT MASTER "
+                "AUTO REFRESH FAILED:",
+                exc,
+            )
 
 
 async def alert_worker_loop(app: FastAPI) -> None:
@@ -624,6 +1941,128 @@ async def health() -> dict[str, Union[bool, str]]:
         "market_warning": app.state.market_warning,
     }
 
+
+
+@app.get(
+    "/api/v2/deep-scan",
+    dependencies=[
+        Depends(
+            require_owner
+        )
+    ],
+)
+async def deep_scan(
+    limit: int = 10,
+) -> dict[str, Any]:
+
+    if (
+        limit < 1
+        or limit > 30
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "limit must be "
+                "between 1 and 30"
+            ),
+        )
+
+    snapshot = dict(
+        getattr(
+            app.state,
+            "deep_scan_snapshot",
+            {},
+        )
+    )
+
+    results = list(
+        snapshot.get(
+            "results",
+            [],
+        )
+    )
+
+    snapshot[
+        "total_available"
+    ] = len(
+        results
+    )
+
+    snapshot[
+        "returned"
+    ] = min(
+        limit,
+        len(results),
+    )
+
+    snapshot[
+        "results"
+    ] = results[
+        :limit
+    ]
+
+    return snapshot
+
+
+@app.get(
+    "/api/v2/fast-scan",
+    dependencies=[
+        Depends(
+            require_owner
+        )
+    ],
+)
+async def fast_scan(
+    limit: int = 30,
+) -> dict[str, Any]:
+
+    if (
+        limit < 1
+        or limit > 100
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "limit must be "
+                "between 1 and 100"
+            ),
+        )
+
+    snapshot = dict(
+        getattr(
+            app.state,
+            "fast_scan_snapshot",
+            {},
+        )
+    )
+
+    ranked = list(
+        snapshot.get(
+            "results",
+            [],
+        )
+    )
+
+    snapshot[
+        "total_ranked"
+    ] = len(
+        ranked
+    )
+
+    snapshot[
+        "returned"
+    ] = min(
+        limit,
+        len(ranked),
+    )
+
+    snapshot[
+        "results"
+    ] = ranked[
+        :limit
+    ]
+
+    return snapshot
 
 
 @app.get(
@@ -1156,62 +2595,87 @@ async def search_instruments(
 
 @app.post(
     "/api/instruments/refresh",
-    dependencies=[Depends(require_owner)],
+    dependencies=[
+        Depends(
+            require_owner
+        )
+    ],
 )
 async def refresh_instruments(
-    session: AsyncSession = Depends(get_session),
-) -> dict[str, int]:
-    """Fetch the Angel One master and retain NSE EQ + index entries only."""
-    async with httpx.AsyncClient(timeout=60) as client:
-        response = await client.get(SCRIP_MASTER_URL)
-        response.raise_for_status()
-        records = response.json()
+    session: AsyncSession = Depends(
+        get_session
+    ),
+) -> dict[str, Any]:
 
-    await session.execute(delete(Instrument))
+    try:
 
-    instruments: list[Instrument] = []
-    seen_symbols: set[str] = set()
-
-    for row in records:
-        exchange = str(row.get("exch_seg", ""))
-        symbol = str(row.get("symbol", ""))
-        token = str(row.get("token", ""))
-        instrument_type = str(row.get("instrumenttype", ""))
-
-        if exchange != "NSE" or not symbol or not token:
-            continue
-
-        if (
-            instrument_type not in {"", "EQ", "AMXIDX"}
-            and not symbol.endswith("-EQ")
-        ):
-            continue
-
-        clean_symbol = symbol.removesuffix("-EQ")
-
-        if clean_symbol in seen_symbols:
-            continue
-
-        seen_symbols.add(clean_symbol)
-
-        instruments.append(
-            Instrument(
-                exchange="NSE",
-                symbol=clean_symbol,
-                name=str(row.get("name") or clean_symbol),
-                token=token,
-                kind=(
-                    "INDEX"
-                    if instrument_type == "AMXIDX"
-                    else "EQUITY"
-                ),
+        result = (
+            await refresh_instrument_master(
+                session
             )
         )
 
-    session.add_all(instruments)
-    await session.commit()
 
-    return {"imported": len(instruments)}
+        app.state.instrument_master = {
+            "status": "READY",
+
+            "imported": int(
+                result.get(
+                    "imported",
+                    0,
+                )
+            ),
+
+            "refreshed_at":
+                result.get(
+                    "refreshed_at"
+                ),
+
+            "error": None,
+        }
+
+
+        return dict(
+            app.state.instrument_master
+        )
+
+
+    except Exception as exc:
+
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                "Unable to refresh "
+                "instrument master: "
+                f"{exc}"
+            ),
+        ) from exc
+
+
+@app.get(
+    "/api/instruments/status",
+    dependencies=[
+        Depends(
+            require_owner
+        )
+    ],
+)
+async def instrument_master_status(
+) -> dict[str, Any]:
+
+    return dict(
+        getattr(
+            app.state,
+            "instrument_master",
+            {
+                "status": "UNKNOWN",
+                "imported": 0,
+                "refreshed_at": None,
+                "error": None,
+            },
+        )
+    )
+
 
 @app.get(
     "/api/watchlist",
@@ -2316,31 +3780,48 @@ async def scan_stock_v2(
 
 
         # ==========================================
-        # 2. TRY FRESH MARKET CANDLES
+        # 2. LOAD FRESH LOCAL LIVE CANDLES
+        #
+        # Do NOT make a fresh Angel One historical
+        # request on every scanner cycle.
+        #
+        # WebSocket ticks already build candles in
+        # LiveCandleEngine.
         # ==========================================
 
         fresh_candles = []
 
+        live_candle_engine = getattr(
+            app.state,
+            "live_candles",
+            None,
+        )
 
-        try:
+        if (
+            live_candle_engine
+            is not None
+        ):
 
-            fresh_candles = (
-                await market()
-                .candles(
+            try:
+
+                fresh_candles = (
+                    live_candle_engine
+                    .candles(
+                        instrument.symbol,
+                        interval,
+                        limit=200,
+                    )
+                )
+
+            except Exception as exc:
+
+                print(
+                    "Scanner local candle "
+                    "read failed:",
                     instrument.symbol,
                     interval,
-                    instrument.token,
+                    exc,
                 )
-            )
-
-        except Exception as exc:
-
-            print(
-                "Scanner live candle read failed:",
-                instrument.symbol,
-                interval,
-                exc,
-            )
 
 
         # ==========================================
