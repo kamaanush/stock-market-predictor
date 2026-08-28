@@ -3,7 +3,10 @@ from dataclasses import dataclass
 from typing import Any, Iterable
 
 from .live_candles import LiveCandleEngine
+from types import SimpleNamespace
 
+from ..database import SessionLocal
+from .candle_history import save_candles
 
 @dataclass
 class WarmupResult:
@@ -53,6 +56,10 @@ async def warm_live_candles(
     candles_loaded = 0
 
     counter_lock = asyncio.Lock()
+
+    persistence_lock = (
+        asyncio.Lock()
+    )
 
     # Enough history for indicators such as:
     # EMA21, MACD26, RSI14, ATR14, etc.
@@ -108,6 +115,40 @@ async def warm_live_candles(
                     candles=candles,
                 )
 
+                # -------------------------------------------------
+                # PERMANENT REPLAY HISTORY
+                #
+                # Persist 1m only for now.
+                # Replay can build 5m candles locally.
+                # This does NOT make another Angel API request.
+                # -------------------------------------------------
+
+                if (
+                    timeframe
+                    == "1m"
+                    and candles
+                ):
+                    async with (
+                        persistence_lock
+                    ):
+                        async with (
+                            SessionLocal()
+                            as db_session
+                        ):
+                            await save_candles(
+                                db_session,
+                                symbol=(
+                                    item.symbol
+                                ),
+                                interval="1m",
+                                candles=candles,
+                            )
+
+                            await (
+                                db_session
+                                .commit()
+                            )
+
                 async with counter_lock:
                     successful_requests += 1
                     candles_loaded += loaded
@@ -123,6 +164,28 @@ async def warm_live_candles(
                     timeframe,
                     exc,
                 )
+    # ---------------------------------------------------------
+    # BENCHMARK HISTORY
+    # NIFTY is required for stock-vs-market RS.
+    # ---------------------------------------------------------
+
+    items = list(
+        items
+    )
+
+    if not any(
+        str(
+            item.symbol
+        ).strip().upper()
+        == "NIFTY 50"
+        for item in items
+    ):
+        items.append(
+            SimpleNamespace(
+                symbol="NIFTY 50",
+                token="99926000",
+            )
+        )
 
     tasks = []
 

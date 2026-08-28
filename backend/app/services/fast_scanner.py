@@ -2,6 +2,10 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any
+from .market_context import (
+    analyze_relative_strength,
+    analyze_effort_vs_result,
+)
 
 
 def _safe_float(
@@ -137,6 +141,7 @@ def analyze_fast_stock(
     *,
     tick: dict[str, Any],
     candle_engine: Any,
+    benchmark_candles: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     symbol = str(
         tick.get(
@@ -220,12 +225,47 @@ def analyze_fast_stock(
             price,
         )
     )
+    market_relative_strength = (
+        analyze_relative_strength(
+            stock_candles=one_minute,
+            benchmark_candles=benchmark_candles,
+        )
+    )
+
+    effort_vs_result = (
+        analyze_effort_vs_result(
+            candles=one_minute,
+            volume_ratio=volume_ratio,
+        )
+    )
+    rs_strength = float(
+        market_relative_strength.get(
+            "strength",
+            0.0,
+        )
+    )
 
     direction_value = (
-        change_5m * 0.55
-        + change_1m * 0.30
+        change_5m * 0.45
+        + change_1m * 0.25
         + breakout_percent * 0.15
+        + rs_strength * 0.15
     )
+    effort_classification = str(
+        effort_vs_result.get(
+            "classification",
+            "NORMAL",
+        )
+    )
+
+    if effort_classification == "EFFICIENT EXPANSION":
+        direction_value *= 1.10
+
+    elif effort_classification == "POSSIBLE ABSORPTION":
+        direction_value *= 0.65
+
+    elif effort_classification == "POSSIBLE REJECTION":
+        direction_value *= 0.75
 
     if direction_value >= 0.08:
         direction = "BULLISH"
@@ -301,6 +341,63 @@ def analyze_fast_stock(
             "downside breakout"
         )
 
+    # ---------------------------------------------------------
+    # MARKET RELATIVE STRENGTH
+    # ---------------------------------------------------------
+
+    rs_persistence = str(
+        market_relative_strength.get(
+            "persistence",
+            "UNKNOWN",
+        )
+    )
+
+    rs_5m = float(
+        market_relative_strength.get(
+            "rs_5m_pct",
+            0.0,
+        )
+    )
+
+    if rs_persistence == "PERSISTENT OUTPERFORMANCE":
+        reasons.append(
+            f"persistent NIFTY outperformance {rs_5m:+.2f}%"
+        )
+
+    elif rs_persistence == "PERSISTENT UNDERPERFORMANCE":
+        reasons.append(
+            f"persistent NIFTY underperformance {rs_5m:+.2f}%"
+        )
+
+    elif rs_persistence == "IMPROVING":
+        reasons.append(
+            f"relative strength improving {rs_5m:+.2f}%"
+        )
+
+    elif rs_persistence == "WEAKENING":
+        reasons.append(
+            f"relative strength weakening {rs_5m:+.2f}%"
+        )
+
+    # ---------------------------------------------------------
+    # EFFORT VS RESULT
+    # ---------------------------------------------------------
+
+    if effort_classification == "EFFICIENT EXPANSION":
+        reasons.append(
+            "volume producing efficient price expansion"
+        )
+
+    elif effort_classification == "POSSIBLE ABSORPTION":
+        reasons.append(
+            "possible high-volume absorption"
+        )
+
+    elif effort_classification == "POSSIBLE REJECTION":
+        reasons.append(
+            "possible price rejection"
+        )
+
     if not reasons:
         reasons.append(
             "normal activity"
@@ -357,6 +454,95 @@ def analyze_fast_stock(
                 breakout_percent,
                 3,
             ),
+                    "relative_strength": {
+            "vs": "NIFTY 50",
+
+            "rs_1m_percent": (
+                market_relative_strength.get(
+                    "rs_1m_pct",
+                    0.0,
+                )
+            ),
+
+            "rs_3m_percent": (
+                market_relative_strength.get(
+                    "rs_3m_pct",
+                    0.0,
+                )
+            ),
+
+            "rs_5m_percent": (
+                market_relative_strength.get(
+                    "rs_5m_pct",
+                    0.0,
+                )
+            ),
+
+            "strength": (
+                market_relative_strength.get(
+                    "strength",
+                    0.0,
+                )
+            ),
+
+            "persistence": (
+                market_relative_strength.get(
+                    "persistence",
+                    "UNKNOWN",
+                )
+            ),
+
+            "direction": (
+                market_relative_strength.get(
+                    "direction",
+                    "NEUTRAL",
+                )
+            ),
+
+            "available": (
+                market_relative_strength.get(
+                    "available",
+                    False,
+                )
+            ),
+        },
+
+        "effort_vs_result": {
+            "classification": (
+                effort_vs_result.get(
+                    "classification",
+                    "UNKNOWN",
+                )
+            ),
+
+            "range_ratio": (
+                effort_vs_result.get(
+                    "range_ratio",
+                    0.0,
+                )
+            ),
+
+            "body_ratio": (
+                effort_vs_result.get(
+                    "body_ratio",
+                    0.0,
+                )
+            ),
+
+            "close_location": (
+                effort_vs_result.get(
+                    "close_location",
+                    0.5,
+                )
+            ),
+
+            "quality": (
+                effort_vs_result.get(
+                    "quality",
+                    0.0,
+                )
+            ),
+        },
 
         "cumulative_volume":
             _safe_float(
@@ -387,13 +573,41 @@ def build_fast_scan_snapshot(
         dict[str, Any]
     ] = []
 
+    # ---------------------------------------------------------
+    # NIFTY BENCHMARK
+    # Fetch ONCE per scanner cycle, not once per stock.
+    # ---------------------------------------------------------
+
+    try:
+        benchmark_candles = (
+            candle_engine.candles(
+                "NIFTY 50",
+                "1m",
+                limit=12,
+            )
+        )
+
+    except Exception as exc:
+        print(
+            "[FAST SCANNER] "
+            "NIFTY benchmark unavailable:",
+            exc,
+        )
+
+        benchmark_candles = []
+
+    # ---------------------------------------------------------
+    # ANALYZE STOCKS
+    # ---------------------------------------------------------
+
     for tick in ticks:
         try:
             result = (
                 analyze_fast_stock(
                     tick=tick,
-                    candle_engine=(
-                        candle_engine
+                    candle_engine=candle_engine,
+                    benchmark_candles=(
+                        benchmark_candles
                     ),
                 )
             )

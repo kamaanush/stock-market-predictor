@@ -5,6 +5,7 @@ import io
 from contextlib import asynccontextmanager, suppress
 from datetime import datetime, timezone
 from typing import Any, Optional, Union
+from zoneinfo import ZoneInfo
 
 import httpx
 from fastapi import (
@@ -79,6 +80,9 @@ from .services.candle_history import (
     latest_candle_time,
     load_candles,
     save_candles,
+)
+from .services.replay_market import (
+    build_replay_inputs,
 )
 
 SCRIP_MASTER_URL = (
@@ -253,15 +257,33 @@ async def lifespan(app: FastAPI):
                     ),
                 )
 
-                live_market.configure(
-                    [
+                subscriptions = [
+                    (
+                        item.symbol,
+                        item.token,
+                    )
+                    for item in watchlist
+                    if item.token
+                ]
+
+                # ---------------------------------------------------------
+                # NIFTY 50 BENCHMARK
+                # Required for stock-vs-market relative strength.
+                # ---------------------------------------------------------
+
+                if not any(
+                    symbol.upper() == "NIFTY 50"
+                    for symbol, _ in subscriptions
+                ):
+                    subscriptions.append(
                         (
-                            item.symbol,
-                            item.token,
+                            "NIFTY 50",
+                            "99926000",
                         )
-                        for item in watchlist
-                        if item.token
-                    ]
+                    )
+
+                live_market.configure(
+                    subscriptions
                 )
 
                 def handle_live_tick(
@@ -468,14 +490,21 @@ async def fast_scanner_worker_loop(
     app: FastAPI,
 ) -> None:
     """
-    Continuously rank the complete live
-    scan universe using only local
-    WebSocket data and locally built
-    candles.
+    Continuously rank the live scan universe
+    using local WebSocket data and locally
+    built candles.
 
-    This does NOT call Angel One
+    Stale WebSocket ticks are not considered
+    LIVE data.
+
+    This function does NOT call Angel One
     historical APIs.
     """
+
+    from datetime import (
+        datetime,
+        timezone,
+    )
 
     while True:
         try:
@@ -491,23 +520,105 @@ async def fast_scanner_worker_loop(
                 None,
             )
 
+            fresh_ticks = []
+
             if (
                 live_market is not None
-                and candle_engine
-                is not None
+                and candle_engine is not None
             ):
                 ticks = (
                     live_market.snapshot()
                 )
 
-                app.state.fast_scan_snapshot = (
+                now_timestamp = (
+                    datetime.now(
+                        timezone.utc
+                    ).timestamp()
+                )
+
+                for tick in ticks:
+                    raw_timestamp = (
+                        tick.get(
+                            "exchange_timestamp"
+                        )
+                    )
+
+                    try:
+                        tick_timestamp = float(
+                            raw_timestamp
+                        )
+
+                        if (
+                            tick_timestamp
+                            > 10_000_000_000
+                        ):
+                            tick_timestamp /= 1000.0
+
+                    except (
+                        TypeError,
+                        ValueError,
+                    ):
+                        continue
+
+                    age_seconds = (
+                        now_timestamp
+                        - tick_timestamp
+                    )
+
+                    # Only ticks received within
+                    # the previous 90 seconds
+                    # are considered genuinely live.
+                    if (
+                        0
+                        <= age_seconds
+                        <= 90
+                    ):
+                        fresh_ticks.append(
+                            tick
+                        )
+
+            if (
+                fresh_ticks
+                and candle_engine is not None
+            ):
+                snapshot = (
                     build_fast_scan_snapshot(
-                        ticks=ticks,
+                        ticks=fresh_ticks,
                         candle_engine=(
                             candle_engine
                         ),
                     )
                 )
+
+                snapshot[
+                    "mode"
+                ] = "LIVE"
+
+                snapshot[
+                    "data_source"
+                ] = "ANGEL_WEBSOCKET"
+
+                app.state.fast_scan_snapshot = (
+                    snapshot
+                )
+
+            else:
+                # Do not leave stale WebSocket
+                # results marked as LIVE.
+                app.state.fast_scan_snapshot = {
+                    "generated_at": (
+                        datetime.now(
+                            timezone.utc
+                        ).isoformat()
+                    ),
+                    "live_count": 0,
+                    "scored_count": 0,
+                    "warming_up_count": 0,
+                    "bullish_count": 0,
+                    "bearish_count": 0,
+                    "neutral_count": 0,
+                    "results": [],
+                }
 
         except Exception as exc:
             print(
@@ -518,7 +629,6 @@ async def fast_scanner_worker_loop(
         await asyncio.sleep(
             5
         )
-
 
 def _scanner_model_to_dict(
     value: Any,
@@ -2014,6 +2124,9 @@ async def deep_scan(
 )
 async def fast_scan(
     limit: int = 30,
+    session: AsyncSession = Depends(
+        get_session
+    ),
 ) -> dict[str, Any]:
 
     if (
@@ -2035,6 +2148,108 @@ async def fast_scan(
             {},
         )
     )
+
+    # ---------------------------------------------------------
+    # LIVE / REPLAY SOURCE SELECTION
+    # ---------------------------------------------------------
+
+    live_results = list(
+        snapshot.get(
+            "results",
+            [],
+        )
+    )
+
+    live_count = int(
+        snapshot.get(
+            "live_count",
+            0,
+        )
+        or 0
+    )
+
+    if (
+        live_count > 0
+        and live_results
+    ):
+        snapshot[
+            "mode"
+        ] = "LIVE"
+
+        snapshot[
+            "data_source"
+        ] = "ANGEL_WEBSOCKET"
+
+    else:
+
+        try:
+            (
+                replay_ticks,
+                replay_engine,
+            ) = await build_replay_inputs(
+                session,
+                symbol_limit=500,
+                candle_limit=120,
+                benchmark_symbol=(
+                    "NIFTY 50"
+                ),
+            )
+
+            if replay_ticks:
+
+                snapshot = (
+                    build_fast_scan_snapshot(
+                        ticks=replay_ticks,
+                        candle_engine=(
+                            replay_engine
+                        ),
+                    )
+                )
+
+                snapshot[
+                    "mode"
+                ] = "REPLAY"
+
+                snapshot[
+                    "data_source"
+                ] = (
+                    "CANDLE_HISTORY"
+                )
+
+                snapshot[
+                    "replay_count"
+                ] = len(
+                    replay_ticks
+                )
+
+            else:
+
+                snapshot[
+                    "mode"
+                ] = "NO_DATA"
+
+                snapshot[
+                    "data_source"
+                ] = (
+                    "NONE"
+                )
+
+        except Exception as exc:
+
+            print(
+                "[FAST SCAN REPLAY]",
+                exc,
+            )
+
+            snapshot[
+                "mode"
+            ] = "REPLAY_ERROR"
+
+            snapshot[
+                "replay_error"
+            ] = str(
+                exc
+            )
 
     ranked = list(
         snapshot.get(
@@ -2788,7 +3003,7 @@ async def get_watchlist(
 
 
     return output
-    
+
 @app.post(
     "/api/watchlist",
     response_model=WatchlistOut,
