@@ -1,0 +1,1029 @@
+from __future__ import annotations
+
+from collections import defaultdict, deque
+from datetime import datetime, timezone
+from typing import Any
+
+
+def _number(
+    value: Any,
+    default: float | None = None,
+) -> float | None:
+    try:
+        number = float(value)
+
+        if number != number:
+            return default
+
+        return number
+
+    except (
+        TypeError,
+        ValueError,
+    ):
+        return default
+
+
+def _timestamp(
+    value: Any,
+) -> float | None:
+
+    if value is None:
+        return None
+
+    try:
+        number = float(value)
+
+        if number > 10_000_000_000:
+            number /= 1000.0
+
+        return number
+
+    except (
+        TypeError,
+        ValueError,
+    ):
+        pass
+
+    try:
+        return (
+            datetime
+            .fromisoformat(
+                str(value)
+                .replace(
+                    "Z",
+                    "+00:00",
+                )
+            )
+            .timestamp()
+        )
+
+    except Exception:
+        return None
+
+
+def _market_timestamp(
+    *,
+    ticks: list[dict[str, Any]],
+    snapshot: dict[str, Any],
+) -> float:
+
+    values: list[float] = []
+
+    for tick in ticks:
+
+        value = _timestamp(
+            tick.get(
+                "exchange_timestamp"
+            )
+        )
+
+        if value is None:
+            value = _timestamp(
+                tick.get(
+                    "received_at"
+                )
+            )
+
+        if value is not None:
+            values.append(
+                value
+            )
+
+    if values:
+        return max(values)
+
+    generated = _timestamp(
+        snapshot.get(
+            "generated_at"
+        )
+    )
+
+    if generated is not None:
+        return generated
+
+    return datetime.now(
+        timezone.utc
+    ).timestamp()
+
+
+def _extract_rvol(
+    stock: dict[str, Any],
+    edge: dict[str, Any],
+) -> float | None:
+
+    direct_values = [
+        edge.get("rvol"),
+        edge.get(
+            "time_rvol"
+        ),
+        stock.get("rvol"),
+        stock.get(
+            "time_rvol"
+        ),
+        stock.get(
+            "relative_volume"
+        ),
+        stock.get(
+            "volume_ratio"
+        ),
+    ]
+
+    for value in direct_values:
+
+        number = _number(
+            value
+        )
+
+        if number is not None:
+            return number
+
+    nested_candidates = [
+        edge.get(
+            "time_normalized_rvol"
+        ),
+        stock.get(
+            "time_normalized_rvol"
+        ),
+    ]
+
+    for candidate in nested_candidates:
+
+        if not isinstance(
+            candidate,
+            dict,
+        ):
+            continue
+
+        for key in (
+            "rvol",
+            "ratio",
+            "value",
+            "relative_volume",
+        ):
+
+            number = _number(
+                candidate.get(
+                    key
+                )
+            )
+
+            if number is not None:
+                return number
+
+    return None
+
+
+class OpportunityVelocityTracker:
+
+    def __init__(
+        self,
+        *,
+        history_seconds: int = 900,
+        entrant_ttl_seconds: int = 180,
+    ) -> None:
+
+        self.history_seconds = (
+            history_seconds
+        )
+
+        self.entrant_ttl_seconds = (
+            entrant_ttl_seconds
+        )
+
+        self.history: dict[
+            str,
+            deque[
+                dict[str, float | None]
+            ],
+        ] = defaultdict(
+            deque
+        )
+
+        self.entrant_events: deque[
+            dict[str, Any]
+        ] = deque()
+
+        self.last_batch_timestamp: float | None = None
+
+    def reset(
+        self,
+    ) -> None:
+
+        self.history.clear()
+        self.entrant_events.clear()
+
+        self.last_batch_timestamp = (
+            None
+        )
+
+    @staticmethod
+    def _historical_point(
+        history: deque[
+            dict[str, float | None]
+        ],
+        target_timestamp: float,
+    ) -> dict[str, float | None] | None:
+
+        for point in reversed(
+            history
+        ):
+
+            point_timestamp = (
+                point["timestamp"]
+            )
+
+            if (
+                point_timestamp
+                is not None
+                and point_timestamp
+                <= target_timestamp
+            ):
+                return point
+
+        return None
+
+    def update(
+        self,
+        *,
+        snapshot: dict[str, Any],
+        ticks: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+
+        source_timestamp = (
+            _market_timestamp(
+                ticks=ticks,
+                snapshot=snapshot,
+            )
+        )
+
+        # Replay/backfill can move backwards
+        # in time. Reset rather than mixing
+        # two different market periods.
+        if (
+            self.last_batch_timestamp
+            is not None
+            and source_timestamp
+            < self.last_batch_timestamp
+            - 60
+        ):
+            self.reset()
+
+        is_new_batch = (
+            self.last_batch_timestamp
+            is None
+            or source_timestamp
+            > self.last_batch_timestamp
+            + 0.5
+        )
+
+        results = list(
+            snapshot.get(
+                "results",
+                [],
+            )
+            or []
+        )
+
+        enriched_results: list[
+            dict[str, Any]
+        ] = []
+
+        velocity_by_symbol:
+            dict[
+                str,
+                dict[str, Any],
+            ] = {}
+
+        rising_rows: list[
+            dict[str, Any]
+        ] = []
+
+        for original_stock in results:
+
+            stock = dict(
+                original_stock
+            )
+
+            symbol = str(
+                stock.get(
+                    "symbol",
+                    "",
+                )
+            ).upper()
+
+            edge = dict(
+                stock.get(
+                    "experimental_edge",
+                    {}
+                )
+                or {}
+            )
+
+            score = _number(
+                edge.get(
+                    "opportunity_score"
+                )
+            )
+
+            if score is None:
+                score = _number(
+                    stock.get(
+                        "opportunity_score"
+                    )
+                )
+
+            rvol = _extract_rvol(
+                stock,
+                edge,
+            )
+
+            if (
+                not symbol
+                or score is None
+            ):
+                enriched_results.append(
+                    stock
+                )
+                continue
+
+            history = self.history[
+                symbol
+            ]
+
+            previous = (
+                history[-1]
+                if history
+                else None
+            )
+
+            if is_new_batch:
+
+                while (
+                    history
+                    and (
+                        source_timestamp
+                        - float(
+                            history[0][
+                                "timestamp"
+                            ]
+                            or 0
+                        )
+                    )
+                    > self.history_seconds
+                ):
+                    history.popleft()
+
+                history.append(
+                    {
+                        "timestamp":
+                            source_timestamp,
+
+                        "score":
+                            score,
+
+                        "rvol":
+                            rvol,
+                    }
+                )
+
+            point_1m = (
+                self._historical_point(
+                    history,
+                    source_timestamp
+                    - 60,
+                )
+            )
+
+            point_5m = (
+                self._historical_point(
+                    history,
+                    source_timestamp
+                    - 300,
+                )
+            )
+
+            score_1m = (
+                _number(
+                    point_1m.get(
+                        "score"
+                    )
+                )
+                if point_1m
+                else None
+            )
+
+            score_5m = (
+                _number(
+                    point_5m.get(
+                        "score"
+                    )
+                )
+                if point_5m
+                else None
+            )
+
+            rvol_1m = (
+                _number(
+                    point_1m.get(
+                        "rvol"
+                    )
+                )
+                if point_1m
+                else None
+            )
+
+            rvol_5m = (
+                _number(
+                    point_5m.get(
+                        "rvol"
+                    )
+                )
+                if point_5m
+                else None
+            )
+
+            delta_1m = (
+                score
+                - score_1m
+                if score_1m
+                is not None
+                else None
+            )
+
+            delta_5m = (
+                score
+                - score_5m
+                if score_5m
+                is not None
+                else None
+            )
+
+            rvol_delta_1m = (
+                rvol
+                - rvol_1m
+                if (
+                    rvol is not None
+                    and rvol_1m
+                    is not None
+                )
+                else None
+            )
+
+            rvol_delta_5m = (
+                rvol
+                - rvol_5m
+                if (
+                    rvol is not None
+                    and rvol_5m
+                    is not None
+                )
+                else None
+            )
+
+            previous_score = (
+                _number(
+                    previous.get(
+                        "score"
+                    )
+                )
+                if previous
+                else None
+            )
+
+            crossed_thresholds: list[
+                int
+            ] = []
+
+            if (
+                is_new_batch
+                and previous_score
+                is not None
+            ):
+
+                for threshold in (
+                    40,
+                    50,
+                    60,
+                ):
+
+                    if (
+                        previous_score
+                        < threshold
+                        <= score
+                    ):
+                        crossed_thresholds.append(
+                            threshold
+                        )
+
+            new_threshold = (
+                max(
+                    crossed_thresholds
+                )
+                if crossed_thresholds
+                else None
+            )
+
+            if (
+                new_threshold
+                is not None
+            ):
+
+                self.entrant_events.append(
+                    {
+                        "symbol":
+                            symbol,
+
+                        "threshold":
+                            new_threshold,
+
+                        "opportunity_score":
+                            round(
+                                score,
+                                2,
+                            ),
+
+                        "rvol":
+                            (
+                                round(
+                                    rvol,
+                                    2,
+                                )
+                                if rvol
+                                is not None
+                                else None
+                            ),
+
+                        "crossed_at":
+                            datetime.fromtimestamp(
+                                source_timestamp,
+                                tz=timezone.utc,
+                            ).isoformat(),
+                    }
+                )
+
+            if (
+                delta_1m is None
+                and delta_5m is None
+            ):
+                velocity_state = (
+                    "WARMING_UP"
+                )
+
+            elif (
+                (
+                    delta_1m
+                    or 0
+                ) > 0
+                or (
+                    delta_5m
+                    or 0
+                ) > 0
+            ):
+                velocity_state = (
+                    "RISING"
+                )
+
+            elif (
+                (
+                    delta_1m
+                    or 0
+                ) < 0
+                or (
+                    delta_5m
+                    or 0
+                ) < 0
+            ):
+                velocity_state = (
+                    "FALLING"
+                )
+
+            else:
+                velocity_state = (
+                    "FLAT"
+                )
+
+            velocity = {
+                "score_now":
+                    round(
+                        score,
+                        2,
+                    ),
+
+                "score_1m_ago":
+                    (
+                        round(
+                            score_1m,
+                            2,
+                        )
+                        if score_1m
+                        is not None
+                        else None
+                    ),
+
+                "score_5m_ago":
+                    (
+                        round(
+                            score_5m,
+                            2,
+                        )
+                        if score_5m
+                        is not None
+                        else None
+                    ),
+
+                "delta_1m":
+                    (
+                        round(
+                            delta_1m,
+                            2,
+                        )
+                        if delta_1m
+                        is not None
+                        else None
+                    ),
+
+                "delta_5m":
+                    (
+                        round(
+                            delta_5m,
+                            2,
+                        )
+                        if delta_5m
+                        is not None
+                        else None
+                    ),
+
+                "rvol_now":
+                    (
+                        round(
+                            rvol,
+                            2,
+                        )
+                        if rvol
+                        is not None
+                        else None
+                    ),
+
+                "rvol_1m_ago":
+                    (
+                        round(
+                            rvol_1m,
+                            2,
+                        )
+                        if rvol_1m
+                        is not None
+                        else None
+                    ),
+
+                "rvol_5m_ago":
+                    (
+                        round(
+                            rvol_5m,
+                            2,
+                        )
+                        if rvol_5m
+                        is not None
+                        else None
+                    ),
+
+                "rvol_delta_1m":
+                    (
+                        round(
+                            rvol_delta_1m,
+                            2,
+                        )
+                        if rvol_delta_1m
+                        is not None
+                        else None
+                    ),
+
+                "rvol_delta_5m":
+                    (
+                        round(
+                            rvol_delta_5m,
+                            2,
+                        )
+                        if rvol_delta_5m
+                        is not None
+                        else None
+                    ),
+
+                "state":
+                    velocity_state,
+
+                "new_threshold":
+                    new_threshold,
+            }
+
+            edge[
+                "opportunity_velocity"
+            ] = velocity
+
+            stock[
+                "experimental_edge"
+            ] = edge
+
+            velocity_by_symbol[
+                symbol
+            ] = velocity
+
+            if (
+                (
+                    delta_1m
+                    is not None
+                    and delta_1m > 0
+                )
+                or (
+                    delta_5m
+                    is not None
+                    and delta_5m > 0
+                )
+            ):
+
+                rising_rows.append(
+                    {
+                        "symbol":
+                            symbol,
+
+                        "ltp":
+                            stock.get(
+                                "ltp"
+                            ),
+
+                        "opportunity_score":
+                            round(
+                                score,
+                                2,
+                            ),
+
+                        "delta_1m":
+                            velocity[
+                                "delta_1m"
+                            ],
+
+                        "delta_5m":
+                            velocity[
+                                "delta_5m"
+                            ],
+
+                        "rvol":
+                            velocity[
+                                "rvol_now"
+                            ],
+
+                        "rvol_delta_1m":
+                            velocity[
+                                "rvol_delta_1m"
+                            ],
+
+                        "rvol_delta_5m":
+                            velocity[
+                                "rvol_delta_5m"
+                            ],
+
+                        "volume":
+                            stock.get(
+                                "volume"
+                            ),
+
+                        "change_1m_percent":
+                            stock.get(
+                                "change_1m_percent"
+                            ),
+
+                        "change_5m_percent":
+                            stock.get(
+                                "change_5m_percent"
+                            ),
+                    }
+                )
+
+            enriched_results.append(
+                stock
+            )
+
+        while (
+            self.entrant_events
+            and (
+                source_timestamp
+                - _timestamp(
+                    self.entrant_events[
+                        0
+                    ][
+                        "crossed_at"
+                    ]
+                )
+            )
+            > self.entrant_ttl_seconds
+        ):
+            self.entrant_events.popleft()
+
+        def rising_sort_key(
+            row: dict[str, Any],
+        ) -> tuple[
+            float,
+            float,
+            float,
+        ]:
+
+            delta_1m = (
+                _number(
+                    row.get(
+                        "delta_1m"
+                    ),
+                    -999.0,
+                )
+                or -999.0
+            )
+
+            delta_5m = (
+                _number(
+                    row.get(
+                        "delta_5m"
+                    ),
+                    -999.0,
+                )
+                or -999.0
+            )
+
+            rvol_delta = (
+                _number(
+                    row.get(
+                        "rvol_delta_1m"
+                    ),
+                    -999.0,
+                )
+                or -999.0
+            )
+
+            return (
+                delta_1m,
+                delta_5m,
+                rvol_delta,
+            )
+
+        rising_rows.sort(
+            key=rising_sort_key,
+            reverse=True,
+        )
+
+        new_snapshot = dict(
+            snapshot
+        )
+
+        new_snapshot[
+            "results"
+        ] = enriched_results
+
+        summary = dict(
+            new_snapshot.get(
+                "experimental_edge_summary",
+                {},
+            )
+            or {}
+        )
+
+        opportunity_rows = list(
+            summary.get(
+                "opportunity_rows",
+                [],
+            )
+            or []
+        )
+
+        updated_opportunity_rows: list[
+            dict[str, Any]
+        ] = []
+
+        for original_row in opportunity_rows:
+
+            row = dict(
+                original_row
+            )
+
+            symbol = str(
+                row.get(
+                    "symbol",
+                    "",
+                )
+            ).upper()
+
+            velocity = (
+                velocity_by_symbol.get(
+                    symbol
+                )
+            )
+
+            if velocity:
+
+                row[
+                    "opportunity_velocity"
+                ] = velocity
+
+                row[
+                    "opportunity_delta_1m"
+                ] = velocity[
+                    "delta_1m"
+                ]
+
+                row[
+                    "opportunity_delta_5m"
+                ] = velocity[
+                    "delta_5m"
+                ]
+
+                row[
+                    "rvol_delta_1m"
+                ] = velocity[
+                    "rvol_delta_1m"
+                ]
+
+                row[
+                    "rvol_delta_5m"
+                ] = velocity[
+                    "rvol_delta_5m"
+                ]
+
+            updated_opportunity_rows.append(
+                row
+            )
+
+        if opportunity_rows:
+            summary[
+                "opportunity_rows"
+            ] = updated_opportunity_rows
+
+        summary[
+            "rising_fast"
+        ] = rising_rows[:20]
+
+        summary[
+            "rising_fast_count"
+        ] = len(
+            rising_rows
+        )
+
+        summary[
+            "new_entrants"
+        ] = list(
+            reversed(
+                self.entrant_events
+            )
+        )[:20]
+
+        summary[
+            "new_entrant_count"
+        ] = len(
+            self.entrant_events
+        )
+
+        summary[
+            "velocity_market_timestamp"
+        ] = (
+            datetime.fromtimestamp(
+                source_timestamp,
+                tz=timezone.utc,
+            ).isoformat()
+        )
+
+        new_snapshot[
+            "experimental_edge_summary"
+        ] = summary
+
+        if is_new_batch:
+            self.last_batch_timestamp = (
+                source_timestamp
+            )
+
+        return new_snapshot
+
+
+_TRACKER = (
+    OpportunityVelocityTracker()
+)
+
+
+def attach_opportunity_velocity(
+    *,
+    snapshot: dict[str, Any],
+    ticks: list[dict[str, Any]],
+) -> dict[str, Any]:
+
+    try:
+        return _TRACKER.update(
+            snapshot=snapshot,
+            ticks=ticks,
+        )
+
+    except Exception as exc:
+
+        result = dict(
+            snapshot
+        )
+
+        result[
+            "opportunity_velocity_error"
+        ] = str(exc)
+
+        return result

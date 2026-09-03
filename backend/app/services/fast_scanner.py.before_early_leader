@@ -2,17 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from typing import Any
-from .market_breadth import (
-    analyze_market_breadth,
-)
-
-from .leadership_rotation import (
-    LeadershipRotationTracker,
-)
-
 from .market_context import (
     analyze_relative_strength,
-    analyze_rs_acceleration,
     analyze_effort_vs_result,
 )
 
@@ -146,97 +137,6 @@ def _breakout_percent(
     return 0.0
 
 
-def _breakout_distance_percent(
-    candles: list[
-        dict[str, Any]
-    ],
-    price: float,
-) -> tuple[
-    float,
-    float,
-]:
-    """
-    Distance from the previous short-term
-    resistance/support.
-
-    0 means price is already touching or
-    beyond that level.
-    """
-
-    if (
-        len(candles) < 3
-        or price <= 0
-    ):
-        return (
-            999.0,
-            999.0,
-        )
-
-    previous = candles[
-        max(
-            0,
-            len(candles) - 6,
-        ):
-        -1
-    ]
-
-    if not previous:
-        return (
-            999.0,
-            999.0,
-        )
-
-    previous_high = max(
-        _safe_float(
-            candle.get(
-                "high"
-            )
-        )
-        for candle
-        in previous
-    )
-
-    previous_low = min(
-        _safe_float(
-            candle.get(
-                "low"
-            )
-        )
-        for candle
-        in previous
-    )
-
-    upside_distance = (
-        max(
-            previous_high
-            - price,
-            0.0,
-        )
-        / previous_high
-        * 100.0
-        if previous_high > 0
-        else 999.0
-    )
-
-    downside_distance = (
-        max(
-            price
-            - previous_low,
-            0.0,
-        )
-        / previous_low
-        * 100.0
-        if previous_low > 0
-        else 999.0
-    )
-
-    return (
-        upside_distance,
-        downside_distance,
-    )
-
-
-
 def analyze_fast_stock(
     *,
     tick: dict[str, Any],
@@ -313,62 +213,11 @@ def analyze_fast_stock(
             )
         )
 
-    rolling_volume_ratio = (
+    volume_ratio = (
         _volume_ratio(
             one_minute
         )
     )
-
-    time_rvol = {
-        "available": False,
-        "rvol": 0.0,
-        "classification":
-            "INSUFFICIENT_HISTORY",
-        "samples": 0,
-    }
-
-    rvol_getter = getattr(
-        candle_engine,
-        "time_normalized_rvol",
-        None,
-    )
-
-    if callable(
-        rvol_getter
-    ):
-        try:
-            time_rvol = (
-                rvol_getter(
-                    symbol
-                )
-                or time_rvol
-            )
-
-        except Exception:
-            pass
-
-    if time_rvol.get(
-        "available",
-        False,
-    ):
-        volume_ratio = _safe_float(
-            time_rvol.get(
-                "rvol"
-            )
-        )
-
-        volume_source = (
-            "TIME_NORMALIZED"
-        )
-
-    else:
-        volume_ratio = (
-            rolling_volume_ratio
-        )
-
-        volume_source = (
-            "ROLLING_FALLBACK"
-        )
 
     breakout_percent = (
         _breakout_percent(
@@ -376,27 +225,10 @@ def analyze_fast_stock(
             price,
         )
     )
-
-    (
-        upside_breakout_distance,
-        downside_breakout_distance,
-    ) = _breakout_distance_percent(
-        one_minute,
-        price,
-    )
     market_relative_strength = (
         analyze_relative_strength(
             stock_candles=one_minute,
             benchmark_candles=benchmark_candles,
-        )
-    )
-
-    rs_acceleration = (
-        analyze_rs_acceleration(
-            stock_candles=one_minute,
-            benchmark_candles=(
-                benchmark_candles
-            ),
         )
     )
 
@@ -413,149 +245,12 @@ def analyze_fast_stock(
         )
     )
 
-    rs_acceleration_class = str(
-        rs_acceleration.get(
-            "classification",
-            "UNKNOWN",
-        )
-    )
-
-    rs_acceleration_quality = float(
-        rs_acceleration.get(
-            "quality",
-            0.0,
-        )
-    )
-
-    leadership_state = "NONE"
-    leadership_score = 0.0
-
-    # ---------------------------------------------
-    # EARLY LEADER
-    #
-    # RS acceleration + proximity to breakout +
-    # at least normal market participation.
-    #
-    # This is a ranking feature, NOT a trade signal.
-    # ---------------------------------------------
-
-    if (
-        rs_acceleration_class
-        == "BULLISH_ACCELERATION"
-        and float(
-            rs_acceleration.get(
-                "latest_rs",
-                0.0,
-            )
-        ) >= 0.05
-        and upside_breakout_distance
-        <= 0.25
-        and volume_ratio >= 1.20
-    ):
-
-        leadership_state = (
-            "BULLISH_EARLY_LEADER"
-            if breakout_percent <= 0
-            else "BULLISH_BREAKOUT_LEADER"
-        )
-
-        proximity_quality = max(
-            0.0,
-            1.0
-            - (
-                upside_breakout_distance
-                / 0.25
-            ),
-        )
-
-        volume_quality = min(
-            volume_ratio
-            / 1.50,
-            1.0,
-        )
-
-        leadership_score = (
-            rs_acceleration_quality
-            * 3.5
-            + proximity_quality
-            * 1.5
-            + volume_quality
-            * 1.0
-        )
-
-    elif (
-        rs_acceleration_class
-        == "BEARISH_ACCELERATION"
-        and float(
-            rs_acceleration.get(
-                "latest_rs",
-                0.0,
-            )
-        ) <= -0.05
-        and downside_breakout_distance
-        <= 0.25
-        and volume_ratio >= 1.20
-    ):
-
-        leadership_state = (
-            "BEARISH_EARLY_LEADER"
-            if breakout_percent >= 0
-            else "BEARISH_BREAKOUT_LEADER"
-        )
-
-        proximity_quality = max(
-            0.0,
-            1.0
-            - (
-                downside_breakout_distance
-                / 0.25
-            ),
-        )
-
-        volume_quality = min(
-            volume_ratio
-            / 1.50,
-            1.0,
-        )
-
-        leadership_score = (
-            rs_acceleration_quality
-            * 3.5
-            + proximity_quality
-            * 1.5
-            + volume_quality
-            * 1.0
-        )
-
-    leadership_score = min(
-        leadership_score,
-        6.0,
-    )
-
     direction_value = (
         change_5m * 0.45
         + change_1m * 0.25
         + breakout_percent * 0.15
         + rs_strength * 0.15
     )
-    if (
-        rs_acceleration_class
-        == "BULLISH_ACCELERATION"
-    ):
-        direction_value += (
-            rs_acceleration_quality
-            * 0.04
-        )
-
-    elif (
-        rs_acceleration_class
-        == "BEARISH_ACCELERATION"
-    ):
-        direction_value -= (
-            rs_acceleration_quality
-            * 0.04
-        )
-
     effort_classification = str(
         effort_vs_result.get(
             "classification",
@@ -615,8 +310,7 @@ def analyze_fast_stock(
         momentum_5m_score
         + momentum_1m_score
         + volume_score
-        + breakout_score
-        + leadership_score,
+        + breakout_score,
     )
 
     reasons: list[str] = []
@@ -683,42 +377,6 @@ def analyze_fast_stock(
     elif rs_persistence == "WEAKENING":
         reasons.append(
             f"relative strength weakening {rs_5m:+.2f}%"
-        )
-
-    if (
-        leadership_state
-        == "BULLISH_EARLY_LEADER"
-    ):
-        reasons.append(
-            "bullish RS acceleration "
-            "near resistance"
-        )
-
-    elif (
-        leadership_state
-        == "BEARISH_EARLY_LEADER"
-    ):
-        reasons.append(
-            "bearish RS acceleration "
-            "near support"
-        )
-
-    elif (
-        leadership_state
-        == "BULLISH_BREAKOUT_LEADER"
-    ):
-        reasons.append(
-            "bullish RS acceleration "
-            "with breakout"
-        )
-
-    elif (
-        leadership_state
-        == "BEARISH_BREAKOUT_LEADER"
-    ):
-        reasons.append(
-            "bearish RS acceleration "
-            "with breakdown"
         )
 
     # ---------------------------------------------------------
@@ -791,19 +449,6 @@ def analyze_fast_stock(
                 2,
             ),
 
-        "volume_context": {
-            "source":
-                volume_source,
-
-            "rolling_ratio": round(
-                rolling_volume_ratio,
-                2,
-            ),
-
-            "time_normalized":
-                time_rvol,
-        },
-
         "breakout_percent":
             round(
                 breakout_percent,
@@ -860,86 +505,6 @@ def analyze_fast_stock(
                     False,
                 )
             ),
-        },
-
-        "rs_acceleration": {
-            "available": (
-                rs_acceleration.get(
-                    "available",
-                    False,
-                )
-            ),
-
-            "classification": (
-                rs_acceleration.get(
-                    "classification",
-                    "UNKNOWN",
-                )
-            ),
-
-            "direction": (
-                rs_acceleration.get(
-                    "direction",
-                    "NEUTRAL",
-                )
-            ),
-
-            "rs_change_3m": (
-                rs_acceleration.get(
-                    "rs_change_3m",
-                    0.0,
-                )
-            ),
-
-            "recent_slope": (
-                rs_acceleration.get(
-                    "recent_slope",
-                    0.0,
-                )
-            ),
-
-            "acceleration": (
-                rs_acceleration.get(
-                    "acceleration",
-                    0.0,
-                )
-            ),
-
-            "consistency": (
-                rs_acceleration.get(
-                    "consistency",
-                    0.0,
-                )
-            ),
-
-            "quality": (
-                rs_acceleration.get(
-                    "quality",
-                    0.0,
-                )
-            ),
-        },
-
-        "leadership": {
-            "state":
-                leadership_state,
-
-            "score": round(
-                leadership_score,
-                2,
-            ),
-
-            "upside_breakout_distance_percent":
-                round(
-                    upside_breakout_distance,
-                    3,
-                ),
-
-            "downside_breakout_distance_percent":
-                round(
-                    downside_breakout_distance,
-                    3,
-                ),
         },
 
         "effort_vs_result": {
@@ -1118,38 +683,6 @@ def build_fast_scan_snapshot(
         - bearish
     )
 
-    market_breadth = (
-        analyze_market_breadth(
-            results
-        )
-    )
-
-    rotation_tracker = getattr(
-        build_fast_scan_snapshot,
-        "_rotation_tracker",
-        None,
-    )
-
-    if rotation_tracker is None:
-
-        rotation_tracker = (
-            LeadershipRotationTracker(
-                top_n=15
-            )
-        )
-
-        setattr(
-            build_fast_scan_snapshot,
-            "_rotation_tracker",
-            rotation_tracker,
-        )
-
-    leadership_rotation = (
-        rotation_tracker.update(
-            results
-        )
-    )
-
     return {
         "generated_at": (
             datetime.now(
@@ -1178,115 +711,6 @@ def build_fast_scan_snapshot(
         "neutral_count":
             neutral,
 
-        "market_breadth":
-            market_breadth,
-
-        "leadership_rotation":
-            leadership_rotation,
-
         "results":
             results,
     }
-
-
-# =========================================================
-# EXPERIMENTAL LIVE EDGE V1
-#
-# Research / paper layer only.
-# Does not modify Fast Score or execution.
-# =========================================================
-
-from .experimental_live_edge import (
-    attach_experimental_live_edge,
-)
-
-_build_fast_scan_snapshot_core = (
-    build_fast_scan_snapshot
-)
-
-
-def build_fast_scan_snapshot(
-    *,
-    ticks,
-    candle_engine,
-):
-    snapshot = (
-        _build_fast_scan_snapshot_core(
-            ticks=ticks,
-            candle_engine=candle_engine,
-        )
-    )
-
-    return (
-        attach_experimental_live_edge(
-            snapshot=snapshot,
-            candle_engine=candle_engine,
-        )
-    )
-
-
-# EXPERIMENTAL_LIVE_EDGE_V1
-
-
-# OPPORTUNITY_VELOCITY_V1
-#
-# Descriptive live telemetry only.
-# Does NOT modify Fast Score or trade direction.
-
-from .opportunity_velocity import (
-    attach_opportunity_velocity,
-)
-
-_build_fast_scan_snapshot_before_velocity = (
-    build_fast_scan_snapshot
-)
-
-
-def build_fast_scan_snapshot(
-    *,
-    ticks,
-    candle_engine,
-):
-    snapshot = (
-        _build_fast_scan_snapshot_before_velocity(
-            ticks=ticks,
-            candle_engine=candle_engine,
-        )
-    )
-
-    return attach_opportunity_velocity(
-        snapshot=snapshot,
-        ticks=ticks,
-    )
-
-
-# DIRECTIONAL_LEADERS_V1
-#
-# Directional leadership ranking only.
-# Does NOT modify Fast Score.
-# Does NOT create BUY / SELL signals.
-
-from .directional_leaders import (
-    attach_directional_leaders,
-)
-
-_build_fast_scan_snapshot_before_directional_leaders = (
-    build_fast_scan_snapshot
-)
-
-
-def build_fast_scan_snapshot(
-    *,
-    ticks,
-    candle_engine,
-):
-    snapshot = (
-        _build_fast_scan_snapshot_before_directional_leaders(
-            ticks=ticks,
-            candle_engine=candle_engine,
-        )
-    )
-
-    return attach_directional_leaders(
-        snapshot=snapshot,
-    )

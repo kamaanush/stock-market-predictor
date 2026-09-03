@@ -984,7 +984,9 @@ class AngelOneMarketData:
             )
 
         chunk_days_by_interval = {
-            "1m": 25,
+            # One-day chunks intentionally avoid
+            # truncated ONE_MINUTE responses.
+            "1m": 1,
             "5m": 90,
             "15m": 190,
         }

@@ -143,6 +143,13 @@ async def save_candles(
         dict[str, Any]
     ],
 ) -> int:
+    """
+    Bulk-friendly candle persistence.
+
+    Instead of SELECTing once per candle,
+    fetch existing candles for the entire
+    requested time range in one query.
+    """
 
     if not candles:
         return 0
@@ -153,72 +160,150 @@ async def save_candles(
         .upper()
     )
 
-    saved = 0
+    normalized: dict[
+        datetime,
+        dict[str, float],
+    ] = {}
 
     for source in candles:
-
-        timestamp = _to_datetime(
-            source["time"]
-        )
-
-        statement = (
-            select(
-                CandleHistory
+        try:
+            timestamp = _to_datetime(
+                source["time"]
             )
-            .where(
-                CandleHistory.symbol
-                == normalized_symbol,
-                CandleHistory.interval
-                == interval,
-                CandleHistory.timestamp
-                == timestamp,
-            )
+
+            normalized[
+                timestamp
+            ] = {
+                "open": float(
+                    source["open"]
+                ),
+
+                "high": float(
+                    source["high"]
+                ),
+
+                "low": float(
+                    source["low"]
+                ),
+
+                "close": float(
+                    source["close"]
+                ),
+
+                "volume": float(
+                    source.get(
+                        "volume",
+                        0.0,
+                    )
+                    or 0.0
+                ),
+            }
+
+        except (
+            KeyError,
+            TypeError,
+            ValueError,
+        ):
+            continue
+
+    if not normalized:
+        return 0
+
+    timestamps = sorted(
+        normalized
+    )
+
+    statement = (
+        select(
+            CandleHistory
+        )
+        .where(
+            CandleHistory.symbol
+            == normalized_symbol,
+
+            CandleHistory.interval
+            == interval,
+
+            CandleHistory.timestamp
+            >= timestamps[0],
+
+            CandleHistory.timestamp
+            <= timestamps[-1],
+        )
+    )
+
+    result = await session.execute(
+        statement
+    )
+
+    existing_rows = list(
+        result.scalars()
+    )
+
+    existing_by_time: dict[
+        datetime,
+        CandleHistory,
+    ] = {}
+
+    for row in existing_rows:
+
+        timestamp = (
+            row.timestamp
         )
 
-        result = await session.execute(
-            statement
-        )
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(
+                tzinfo=timezone.utc
+            )
+
+        existing_by_time[
+            timestamp
+        ] = row
+
+    saved = 0
+
+    for (
+        timestamp,
+        values,
+    ) in normalized.items():
 
         existing = (
-            result.scalar_one_or_none()
+            existing_by_time.get(
+                timestamp
+            )
         )
 
         if existing is None:
 
             session.add(
                 CandleHistory(
-                    symbol=
-                        normalized_symbol,
-
-                    interval=
-                        interval,
-
-                    timestamp=
-                        timestamp,
-
-                    open=float(
-                        source["open"]
+                    symbol=(
+                        normalized_symbol
                     ),
 
-                    high=float(
-                        source["high"]
-                    ),
+                    interval=interval,
 
-                    low=float(
-                        source["low"]
-                    ),
+                    timestamp=timestamp,
 
-                    close=float(
-                        source["close"]
-                    ),
+                    open=values[
+                        "open"
+                    ],
 
-                    volume=float(
-                        source.get(
-                            "volume",
-                            0.0,
-                        )
-                        or 0.0
-                    ),
+                    high=values[
+                        "high"
+                    ],
+
+                    low=values[
+                        "low"
+                    ],
+
+                    close=values[
+                        "close"
+                    ],
+
+                    volume=values[
+                        "volume"
+                    ],
                 )
             )
 
@@ -226,28 +311,24 @@ async def save_candles(
 
         else:
 
-            existing.open = float(
-                source["open"]
+            existing.open = (
+                values["open"]
             )
 
-            existing.high = float(
-                source["high"]
+            existing.high = (
+                values["high"]
             )
 
-            existing.low = float(
-                source["low"]
+            existing.low = (
+                values["low"]
             )
 
-            existing.close = float(
-                source["close"]
+            existing.close = (
+                values["close"]
             )
 
-            existing.volume = float(
-                source.get(
-                    "volume",
-                    0.0,
-                )
-                or 0.0
+            existing.volume = (
+                values["volume"]
             )
 
     await session.commit()

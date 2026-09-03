@@ -14,8 +14,6 @@ import StockLoader from "../../components/StockLoader";
 import OverviewPanel from "../../components/dashboard/OverviewPanel";
 import ScannerPanel from "../../components/dashboard/ScannerPanel";
 import MarketRadarPanel from "../../components/dashboard/MarketRadarPanel";
-import FullMarketScannerPanel from "../../components/dashboard/FullMarketScannerPanel";
-import LiveEdgePanel from "../../components/dashboard/LiveEdgePanel";
 import BacktestPanel from "../../components/dashboard/BacktestPanel";
 
 type LiveStock = {
@@ -66,8 +64,6 @@ type WatchlistItem = {
 type DashboardView =
   | "overview"
   | "radar"
-  | "marketscanner"
-  | "liveedge"
   | "scanner"
   | "watchlist"
   | "portfolio"
@@ -378,36 +374,6 @@ export default function Dashboard() {
     sidebarOpen,
     setSidebarOpen,
   ] = useState(true);
-
-
-
-  // NEXUS_LIVE_EDGE_QUERY_VIEW
-  useEffect(() => {
-    const params =
-      new URLSearchParams(
-        window.location.search
-      );
-
-    if (
-      params.get("view") ===
-      "liveedge"
-    ) {
-      setActiveView(
-        "liveedge"
-      );
-
-      setSidebarOpen(
-        false
-      );
-
-      window.history
-        .replaceState(
-          {},
-          "",
-          "/dashboard"
-        );
-    }
-  }, []);
 
   const [
     searchQuery,
@@ -4028,14 +3994,10 @@ export default function Dashboard() {
                 false
               );
 
-              setActiveView("liveedge");
+              window.location.href =
+                "/live-edge";
             }}
-            className={
-              activeView ===
-              "liveedge"
-                ? "nav-item active"
-                : "nav-item"
-            }
+            className="nav-item"
           >
             <span className="nav-icon">
               ⚡
@@ -4048,44 +4010,6 @@ export default function Dashboard() {
 
               <small>
                 Intraday Opportunities
-              </small>
-            </span>
-
-            <span className="nav-arrow">
-              ›
-            </span>
-          </button>
-
-
-          <button
-            type="button"
-            onClick={() => {
-              setActiveView(
-                "marketscanner"
-              );
-
-              setSidebarOpen(
-                false
-              );
-            }}
-            className={
-              activeView ===
-              "marketscanner"
-                ? "nav-item active"
-                : "nav-item"
-            }
-          >
-            <span className="nav-icon">
-              ▤
-            </span>
-
-            <span className="nav-copy">
-              <strong>
-                FULL MARKET SCANNER
-              </strong>
-
-              <small>
-                NSE Momentum Sheet
               </small>
             </span>
 
@@ -4370,14 +4294,6 @@ export default function Dashboard() {
               setActiveView("watchlist");
             }}
           />
-        )}
-
-        {activeView === "liveedge" && (
-          <LiveEdgePanel />
-        )}
-
-        {activeView === "marketscanner" && (
-          <FullMarketScannerPanel />
         )}
 
         {activeView === "backtest" && (

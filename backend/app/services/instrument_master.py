@@ -100,13 +100,17 @@ async def refresh_instrument_master(
             continue
 
 
+        # FULL_NSE_CASH_EQ_FILTER_V1
+        #
+        # Angel's master contains many NSE instruments
+        # whose instrumenttype is blank. Treating every
+        # blank type as equity massively over-includes
+        # the universe.
+        #
+        # NSE cash equities are selected by the -EQ
+        # trading series.
         is_equity = (
-            instrument_type
-            in {
-                "",
-                "EQ",
-            }
-            or raw_symbol.endswith(
+            raw_symbol.endswith(
                 "-EQ"
             )
         )

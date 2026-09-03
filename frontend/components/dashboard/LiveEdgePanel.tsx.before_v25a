@@ -1,0 +1,954 @@
+"use client";
+
+import {
+  useEffect,
+  useMemo,
+  useState,
+} from "react";
+
+import OpportunityDetail from "../live-edge/OpportunityDetail";
+
+type Opportunity = {
+  symbol: string;
+  ltp: number;
+  opportunity_score: number;
+  opportunity_state: string;
+  status?: string;
+
+  [key: string]: any;
+};
+
+type LiveEdgeData = {
+  mode?: string;
+  data_source?: string;
+  generated_at?: string;
+  scored_count?: number;
+  results?: any[];
+  experimental_edge_summary?: any;
+};
+
+function numeric(
+  ...values: unknown[]
+) {
+  for (const value of values) {
+    const number =
+      Number(value);
+
+    if (
+      Number.isFinite(number)
+    ) {
+      return number;
+    }
+  }
+
+  return 0;
+}
+
+function timeLabel(
+  value?: string,
+) {
+  if (!value) {
+    return "WAITING";
+  }
+
+  const date =
+    new Date(value);
+
+  if (
+    Number.isNaN(
+      date.getTime(),
+    )
+  ) {
+    return value;
+  }
+
+  return date.toLocaleTimeString(
+    "en-IN",
+    {
+      hour:
+        "2-digit",
+
+      minute:
+        "2-digit",
+
+      second:
+        "2-digit",
+    },
+  );
+}
+
+export default function LiveEdgePanel() {
+  const [
+    data,
+    setData,
+  ] =
+    useState<LiveEdgeData | null>(
+      null,
+    );
+
+  const [
+    error,
+    setError,
+  ] =
+    useState("");
+
+  const [
+    autoRefresh,
+    setAutoRefresh,
+  ] =
+    useState(true);
+
+  const [
+    selected,
+    setSelected,
+  ] =
+    useState<Opportunity | null>(
+      null,
+    );
+
+  async function load() {
+    try {
+      const response =
+        await fetch(
+          "/api/live-edge",
+          {
+            credentials:
+              "include",
+
+            cache:
+              "no-store",
+          },
+        );
+
+      if (!response.ok) {
+        throw new Error(
+          `Live Edge HTTP ${response.status}`,
+        );
+      }
+
+      const payload =
+        await response.json();
+
+      setData(payload);
+      setError("");
+    } catch (err) {
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Live Edge unavailable",
+      );
+    }
+  }
+
+  useEffect(() => {
+    void load();
+  }, []);
+
+  useEffect(() => {
+    if (!autoRefresh) {
+      return;
+    }
+
+    const timer =
+      window.setInterval(
+        () => {
+          void load();
+        },
+        5000,
+      );
+
+    return () =>
+      window.clearInterval(
+        timer,
+      );
+  }, [
+    autoRefresh,
+  ]);
+
+  const summary =
+    data
+      ?.experimental_edge_summary ??
+    {};
+
+  const opportunities =
+    useMemo(() => {
+      let rows: any[] = [];
+
+      if (
+        Array.isArray(
+          summary.opportunity_rows,
+        )
+      ) {
+        rows =
+          summary.opportunity_rows;
+      } else if (
+        Array.isArray(
+          summary.top_opportunities,
+        )
+      ) {
+        rows =
+          summary.top_opportunities;
+      } else if (
+        Array.isArray(
+          summary.opportunities,
+        )
+      ) {
+        rows =
+          summary.opportunities;
+      }
+
+      if (
+        rows.length === 0 &&
+        Array.isArray(
+          data?.results,
+        )
+      ) {
+        rows =
+          data.results
+            .map(
+              (stock: any) => {
+                const edge =
+                  stock
+                    .experimental_edge ??
+                  {};
+
+                return {
+                  ...stock,
+                  ...edge,
+
+                  symbol:
+                    stock.symbol,
+
+                  ltp:
+                    numeric(
+                      stock.ltp,
+                      edge.ltp,
+                    ),
+
+                  opportunity_score:
+                    numeric(
+                      edge
+                        .opportunity_score,
+                      stock
+                        .opportunity_score,
+                    ),
+
+                  opportunity_state:
+                    edge
+                      .opportunity_state ??
+                    stock
+                      .opportunity_state ??
+                    "NORMAL",
+                };
+              },
+            )
+            .filter(
+              (
+                item: any,
+              ) =>
+                item
+                  .opportunity_score >
+                0,
+            );
+      }
+
+      return rows
+        .map(
+          (
+            item: any,
+          ): Opportunity => ({
+            ...item,
+
+            symbol:
+              String(
+                item.symbol ??
+                "",
+              ),
+
+            ltp:
+              numeric(
+                item.ltp,
+              ),
+
+            opportunity_score:
+              numeric(
+                item
+                  .opportunity_score,
+                item.score,
+              ),
+
+            opportunity_state:
+              String(
+                item
+                  .opportunity_state ??
+                item.state ??
+                "NORMAL",
+              ),
+          }),
+        )
+        .sort(
+          (a, b) =>
+            b.opportunity_score -
+            a.opportunity_score,
+        );
+    }, [
+      data,
+      summary,
+    ]);
+
+  const stocksReady =
+    numeric(
+      summary.stocks_ready,
+      summary.ready_count,
+      data?.scored_count,
+      data?.results?.length,
+    );
+
+  const opportunity40 =
+    numeric(
+      summary
+        .opportunity_40_plus,
+      summary
+        .opportunity_40,
+      opportunities.filter(
+        item =>
+          item.opportunity_score >=
+          40,
+      ).length,
+    );
+
+  const opportunity50 =
+    numeric(
+      summary
+        .opportunity_50_plus,
+      summary
+        .opportunity_50,
+      opportunities.filter(
+        item =>
+          item.opportunity_score >=
+          50,
+      ).length,
+    );
+
+  const opportunity60 =
+    numeric(
+      summary
+        .opportunity_60_plus,
+      summary
+        .opportunity_60,
+      opportunities.filter(
+        item =>
+          item.opportunity_score >=
+          60,
+      ).length,
+    );
+
+  const paperCandidates =
+    numeric(
+      summary
+        .paper_candidate_count,
+      summary
+        .paper_candidates_count,
+      Array.isArray(
+        summary.paper_candidates,
+      )
+        ? summary
+            .paper_candidates
+            .length
+        : 0,
+    );
+
+  const pendingOutcomes =
+    numeric(
+      summary
+        .pending_outcomes,
+      summary
+        .pending_outcome_count,
+    );
+
+  return (
+    <section
+      style={{
+        width:
+          "100%",
+
+        minWidth:
+          0,
+
+        paddingTop:
+          "12px",
+      }}
+    >
+      <div
+        style={{
+          display:
+            "flex",
+
+          alignItems:
+            "center",
+
+          justifyContent:
+            "space-between",
+
+          gap:
+            "18px",
+
+          flexWrap:
+            "wrap",
+
+          marginBottom:
+            "14px",
+        }}
+      >
+        <div>
+          <div
+            style={{
+              color:
+                "#00e5ff",
+
+              fontSize:
+                "10px",
+
+              fontWeight:
+                800,
+
+              letterSpacing:
+                ".14em",
+            }}
+          >
+            ⚡ LIVE EDGE BOARD
+          </div>
+
+          <h1
+            style={{
+              margin:
+                "5px 0 0",
+
+              color:
+                "#eaffff",
+
+              fontSize:
+                "24px",
+            }}
+          >
+            Intraday Movement Radar
+          </h1>
+
+          <div
+            style={{
+              marginTop:
+                "5px",
+
+              color:
+                "#71869c",
+
+              fontSize:
+                "10px",
+            }}
+          >
+            MODE{" "}
+            <strong
+              style={{
+                color:
+                  data?.mode ===
+                  "LIVE"
+                    ? "#00f59b"
+                    : "#ffd166",
+              }}
+            >
+              {data?.mode ??
+                "WAITING"}
+            </strong>
+
+            {" • "}
+
+            {data?.data_source ??
+              "—"}
+
+            {" • "}
+
+            UPDATED{" "}
+
+            {timeLabel(
+              data?.generated_at,
+            )}
+          </div>
+        </div>
+
+        <div
+          style={{
+            display:
+              "flex",
+
+            alignItems:
+              "center",
+
+            gap:
+              "8px",
+          }}
+        >
+          <button
+            type="button"
+            onClick={() =>
+              setAutoRefresh(
+                current =>
+                  !current,
+              )
+            }
+            style={{
+              border:
+                "1px solid #173450",
+
+              borderRadius:
+                "7px",
+
+              padding:
+                "8px 12px",
+
+              background:
+                "#050b16",
+
+              color:
+                autoRefresh
+                  ? "#00f59b"
+                  : "#71869c",
+
+              fontSize:
+                "10px",
+
+              fontWeight:
+                700,
+            }}
+          >
+            AUTO REFRESH{" "}
+            {autoRefresh
+              ? "ON"
+              : "OFF"}
+          </button>
+
+          <button
+            type="button"
+            onClick={() =>
+              void load()
+            }
+            style={{
+              border:
+                "1px solid #00dfff",
+
+              borderRadius:
+                "7px",
+
+              padding:
+                "8px 12px",
+
+              background:
+                "rgba(0,223,255,.08)",
+
+              color:
+                "#7af5ff",
+
+              fontSize:
+                "10px",
+
+              fontWeight:
+                700,
+            }}
+          >
+            REFRESH
+          </button>
+        </div>
+      </div>
+
+      {error && (
+        <div
+          style={{
+            border:
+              "1px solid rgba(255,80,80,.35)",
+
+            background:
+              "rgba(255,80,80,.06)",
+
+            padding:
+              "10px",
+
+            marginBottom:
+              "12px",
+
+            borderRadius:
+              "7px",
+
+            color:
+              "#ff9c9c",
+
+            fontSize:
+              "11px",
+          }}
+        >
+          {error}
+        </div>
+      )}
+
+      <div
+        style={{
+          display:
+            "grid",
+
+          gridTemplateColumns:
+            "repeat(auto-fit, minmax(135px, 1fr))",
+
+          gap:
+            "10px",
+        }}
+      >
+        {[
+          [
+            "STOCKS READY",
+            stocksReady,
+          ],
+
+          [
+            "OPPORTUNITY 40+",
+            opportunity40,
+          ],
+
+          [
+            "OPPORTUNITY 50+",
+            opportunity50,
+          ],
+
+          [
+            "OPPORTUNITY 60+",
+            opportunity60,
+          ],
+
+          [
+            "PAPER CANDIDATES",
+            paperCandidates,
+          ],
+
+          [
+            "PENDING OUTCOMES",
+            pendingOutcomes,
+          ],
+        ].map(
+          ([
+            label,
+            value,
+          ]) => (
+            <div
+              key={label}
+              style={{
+                minHeight:
+                  "90px",
+
+                border:
+                  "1px solid #132a38",
+
+                borderRadius:
+                  "9px",
+
+                padding:
+                  "14px",
+
+                background:
+                  "rgba(3,9,20,.82)",
+              }}
+            >
+              <span
+                style={{
+                  display:
+                    "block",
+
+                  color:
+                    "#71869c",
+
+                  fontSize:
+                    "9px",
+
+                  letterSpacing:
+                    ".08em",
+                }}
+              >
+                {label}
+              </span>
+
+              <strong
+                style={{
+                  display:
+                    "block",
+
+                  marginTop:
+                    "10px",
+
+                  color:
+                    "#ffffff",
+
+                  fontSize:
+                    "25px",
+                }}
+              >
+                {value}
+              </strong>
+            </div>
+          ),
+        )}
+      </div>
+
+      <div
+        style={{
+          marginTop:
+            "14px",
+
+          border:
+            "1px solid rgba(0,225,255,.18)",
+
+          borderRadius:
+            "10px",
+
+          background:
+            "rgba(3,9,20,.70)",
+
+          padding:
+            "16px",
+        }}
+      >
+        <div
+          style={{
+            display:
+              "flex",
+
+            justifyContent:
+              "space-between",
+
+            alignItems:
+              "center",
+
+            marginBottom:
+              "12px",
+          }}
+        >
+          <div>
+            <span
+              style={{
+                color:
+                  "#35e8ff",
+
+                fontSize:
+                  "10px",
+
+                fontWeight:
+                  800,
+              }}
+            >
+              TOP MOVEMENT OPPORTUNITIES
+            </span>
+
+            <div
+              style={{
+                marginTop:
+                  "4px",
+
+                color:
+                  "#5f7488",
+
+                fontSize:
+                  "9px",
+              }}
+            >
+              Movement ranking,
+              not BUY/SELL
+              probability.
+            </div>
+          </div>
+
+          <strong
+            style={{
+              color:
+                "#71869c",
+
+              fontSize:
+                "10px",
+            }}
+          >
+            {
+              opportunities.length
+            }{" "}
+            STOCKS
+          </strong>
+        </div>
+
+        <div
+          style={{
+            display:
+              "grid",
+
+            gridTemplateColumns:
+              "repeat(auto-fit, minmax(190px, 1fr))",
+
+            gap:
+              "9px",
+          }}
+        >
+          {opportunities
+            .slice(
+              0,
+              24,
+            )
+            .map(
+              item => (
+                <button
+                  key={
+                    item.symbol
+                  }
+                  type="button"
+                  onClick={() =>
+                    setSelected(
+                      item,
+                    )
+                  }
+                  style={{
+                    border:
+                      "1px solid #122c3d",
+
+                    borderRadius:
+                      "8px",
+
+                    padding:
+                      "12px",
+
+                    background:
+                      "#040b16",
+
+                    color:
+                      "#dffaff",
+
+                    textAlign:
+                      "left",
+
+                    minWidth:
+                      0,
+                  }}
+                >
+                  <div
+                    style={{
+                      display:
+                        "flex",
+
+                      justifyContent:
+                        "space-between",
+
+                      gap:
+                        "8px",
+                    }}
+                  >
+                    <strong>
+                      {
+                        item.symbol
+                      }
+                    </strong>
+
+                    <strong
+                      style={{
+                        color:
+                          item
+                            .opportunity_score >=
+                          60
+                            ? "#ff7f8d"
+                            : item
+                                .opportunity_score >=
+                              50
+                              ? "#ffd166"
+                              : "#7af5ff",
+                      }}
+                    >
+                      {item
+                        .opportunity_score
+                        .toFixed(
+                          1,
+                        )}
+                    </strong>
+                  </div>
+
+                  <div
+                    style={{
+                      marginTop:
+                        "8px",
+
+                      color:
+                        "#71869c",
+
+                      fontSize:
+                        "9px",
+                    }}
+                  >
+                    ₹
+                    {item.ltp
+                      ? item.ltp.toFixed(
+                          2,
+                        )
+                      : "—"}
+                  </div>
+
+                  <div
+                    style={{
+                      marginTop:
+                        "6px",
+
+                      color:
+                        "#8ea3b8",
+
+                      fontSize:
+                        "8px",
+
+                      overflow:
+                        "hidden",
+
+                      textOverflow:
+                        "ellipsis",
+
+                      whiteSpace:
+                        "nowrap",
+                    }}
+                  >
+                    {
+                      item
+                        .opportunity_state
+                    }
+                  </div>
+
+                  <div
+                    style={{
+                      marginTop:
+                        "10px",
+
+                      color:
+                        "#00dfff",
+
+                      fontSize:
+                        "9px",
+
+                      fontWeight:
+                        700,
+                    }}
+                  >
+                    WHY THIS STOCK? →
+                  </div>
+                </button>
+              ),
+            )}
+        </div>
+      </div>
+
+      {selected && (
+        <OpportunityDetail
+          item={selected}
+          onClose={() =>
+            setSelected(
+              null,
+            )
+          }
+        />
+      )}
+    </section>
+  );
+}

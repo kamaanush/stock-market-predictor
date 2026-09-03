@@ -1,0 +1,1059 @@
+from __future__ import annotations
+
+import asyncio
+import time
+from collections import defaultdict, deque
+from datetime import datetime, timezone
+from typing import Any, Deque, Dict, List, Optional
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from ..models import Instrument
+
+
+def _num(
+    value: Any,
+    default: Optional[float] = None,
+) -> Optional[float]:
+    try:
+        number = float(value)
+
+        if number != number:
+            return default
+
+        return number
+
+    except (TypeError, ValueError):
+        return default
+
+
+def _pct(
+    current: Optional[float],
+    previous: Optional[float],
+) -> Optional[float]:
+    if (
+        current is None
+        or previous is None
+        or previous == 0
+    ):
+        return None
+
+    return (
+        (current - previous)
+        / previous
+        * 100.0
+    )
+
+
+class FullMarketMomentumScanner:
+    """
+    Dynamic NSE cash-market discovery scanner.
+
+    Phase 1:
+    1. Load all NSE equities from local Angel instrument master.
+    2. Fetch SmartAPI FULL market quotes in batches.
+    3. Rank by current turnover.
+    4. Keep top liquid stocks as today's dynamic universe.
+    5. Maintain in-memory quote history.
+    6. Calculate 1m / 5m / 15m momentum.
+
+    This is a discovery/ranking engine.
+    It does NOT produce BUY / SELL signals.
+    """
+
+    def __init__(self) -> None:
+        self.dynamic_universe = []
+        self.dynamic_universe_size = 400
+
+        self.universe_refresh_seconds = 600
+        self.scan_cache_seconds = 12
+
+        self.last_universe_refresh = 0.0
+        self.last_scan_time = 0.0
+
+        self.last_result = None
+
+        self.history = defaultdict(
+            lambda: deque(maxlen=160)
+        )
+
+        self.lock = asyncio.Lock()
+
+    async def _load_equities(
+        self,
+        session: AsyncSession,
+    ) -> List[Dict[str, str]]:
+        result = await session.execute(
+            select(
+                Instrument
+            ).where(
+                Instrument.exchange == "NSE",
+                Instrument.kind == "EQUITY",
+            )
+        )
+
+        instruments = list(
+            result.scalars()
+        )
+
+        output = []
+
+        for item in instruments:
+            symbol = str(
+                item.symbol or ""
+            ).strip().upper()
+
+            token = str(
+                item.token or ""
+            ).strip()
+
+            if (
+                not symbol
+                or not token
+            ):
+                continue
+
+            output.append(
+                {
+                    "symbol": symbol,
+                    "token": token,
+                    "name": str(
+                        item.name
+                        or symbol
+                    ),
+                }
+            )
+
+        return output
+
+    async def _smartapi_batch(
+        self,
+        market: Any,
+        instruments: List[Dict[str, str]],
+    ) -> List[Dict[str, Any]]:
+        client = getattr(
+            market,
+            "client",
+            None,
+        )
+
+        if client is None:
+            raise RuntimeError(
+                "SmartAPI market client is unavailable"
+            )
+
+        token_map = {
+            item["token"]:
+                item
+            for item in instruments
+        }
+
+        tokens = list(
+            token_map.keys()
+        )
+
+        if not tokens:
+            return []
+
+        response = await asyncio.to_thread(
+            client.getMarketData,
+            "FULL",
+            {
+                "NSE": tokens,
+            },
+        )
+
+        if not isinstance(
+            response,
+            dict,
+        ):
+            return []
+
+        if not response.get(
+            "status",
+            False,
+        ):
+            message = response.get(
+                "message",
+                "SmartAPI market-data request failed",
+            )
+
+            raise RuntimeError(
+                str(message)
+            )
+
+        data = response.get(
+            "data",
+            {},
+        )
+
+        if not isinstance(
+            data,
+            dict,
+        ):
+            return []
+
+        fetched = data.get(
+            "fetched",
+            [],
+        )
+
+        if not isinstance(
+            fetched,
+            list,
+        ):
+            return []
+
+        rows = []
+
+        for quote in fetched:
+            if not isinstance(
+                quote,
+                dict,
+            ):
+                continue
+
+            token = str(
+                quote.get(
+                    "symbolToken",
+                    quote.get(
+                        "symboltoken",
+                        "",
+                    ),
+                )
+            ).strip()
+
+            info = token_map.get(
+                token
+            )
+
+            if info is None:
+                continue
+
+            row = dict(
+                quote
+            )
+
+            row["_instrument"] = (
+                info
+            )
+
+            rows.append(
+                row
+            )
+
+        return rows
+
+    async def _fetch_quotes(
+        self,
+        market: Any,
+        instruments: List[Dict[str, str]],
+    ) -> List[Dict[str, Any]]:
+        output = []
+
+        batch_size = 50
+
+        for start in range(
+            0,
+            len(instruments),
+            batch_size,
+        ):
+            batch = instruments[
+                start:
+                start + batch_size
+            ]
+
+            try:
+                rows = (
+                    await self._smartapi_batch(
+                        market,
+                        batch,
+                    )
+                )
+
+                output.extend(
+                    rows
+                )
+
+            except Exception as exc:
+                print(
+                    "[FULL MARKET SCANNER] batch failed:",
+                    exc,
+                )
+
+            # Avoid hammering SmartAPI.
+            if (
+                start + batch_size
+                < len(instruments)
+            ):
+                await asyncio.sleep(
+                    0.35
+                )
+
+        return output
+
+    def _normalize_quote(
+        self,
+        quote: Dict[str, Any],
+    ) -> Optional[Dict[str, Any]]:
+        instrument = quote.get(
+            "_instrument",
+            {},
+        )
+
+        symbol = str(
+            instrument.get(
+                "symbol",
+                "",
+            )
+        ).strip().upper()
+
+        token = str(
+            instrument.get(
+                "token",
+                "",
+            )
+        ).strip()
+
+        ltp = _num(
+            quote.get(
+                "ltp"
+            )
+        )
+
+        close = _num(
+            quote.get(
+                "close"
+            )
+        )
+
+        open_price = _num(
+            quote.get(
+                "open"
+            )
+        )
+
+        high = _num(
+            quote.get(
+                "high"
+            )
+        )
+
+        low = _num(
+            quote.get(
+                "low"
+            )
+        )
+
+        volume = _num(
+            quote.get(
+                "tradeVolume",
+                quote.get(
+                    "tradevolume",
+                    quote.get(
+                        "volume",
+                        0,
+                    ),
+                ),
+            ),
+            0.0,
+        )
+
+        avg_price = _num(
+            quote.get(
+                "avgPrice",
+                quote.get(
+                    "avgprice"
+                ),
+            )
+        )
+
+        day_change = _num(
+            quote.get(
+                "percentChange",
+                quote.get(
+                    "percentchange"
+                ),
+            )
+        )
+
+        if (
+            day_change is None
+            and ltp is not None
+            and close is not None
+            and close != 0
+        ):
+            day_change = (
+                (ltp - close)
+                / close
+                * 100.0
+            )
+
+        if (
+            not symbol
+            or not token
+            or ltp is None
+            or ltp <= 0
+        ):
+            return None
+
+        turnover = (
+            ltp
+            * (
+                volume
+                if volume
+                is not None
+                else 0
+            )
+        )
+
+        return {
+            "symbol":
+                symbol,
+
+            "name":
+                instrument.get(
+                    "name",
+                    symbol,
+                ),
+
+            "token":
+                token,
+
+            "ltp":
+                round(
+                    ltp,
+                    2,
+                ),
+
+            "open":
+                open_price,
+
+            "high":
+                high,
+
+            "low":
+                low,
+
+            "previous_close":
+                close,
+
+            "day_change_pct":
+                (
+                    round(
+                        day_change,
+                        3,
+                    )
+                    if day_change
+                    is not None
+                    else None
+                ),
+
+            "volume":
+                volume,
+
+            "avg_price":
+                avg_price,
+
+            "turnover":
+                turnover,
+        }
+
+    async def _refresh_dynamic_universe(
+        self,
+        session: AsyncSession,
+        market: Any,
+    ) -> None:
+        instruments = (
+            await self._load_equities(
+                session
+            )
+        )
+
+        print(
+            "[FULL MARKET SCANNER] NSE equities:",
+            len(instruments),
+        )
+
+        quotes = (
+            await self._fetch_quotes(
+                market,
+                instruments,
+            )
+        )
+
+        normalized = []
+
+        for quote in quotes:
+            row = (
+                self._normalize_quote(
+                    quote
+                )
+            )
+
+            if row is None:
+                continue
+
+            # Avoid obvious unusable penny / invalid
+            # instruments while retaining broad coverage.
+            if row["ltp"] < 10:
+                continue
+
+            normalized.append(
+                row
+            )
+
+        normalized.sort(
+            key=lambda row:
+                row.get(
+                    "turnover",
+                    0,
+                )
+                or 0,
+            reverse=True,
+        )
+
+        selected = normalized[
+            :self.dynamic_universe_size
+        ]
+
+        self.dynamic_universe = [
+            {
+                "symbol":
+                    row["symbol"],
+
+                "token":
+                    row["token"],
+
+                "name":
+                    row["name"],
+            }
+            for row in selected
+        ]
+
+        self.last_universe_refresh = (
+            time.monotonic()
+        )
+
+        print(
+            "[FULL MARKET SCANNER] dynamic universe:",
+            len(
+                self.dynamic_universe
+            ),
+        )
+
+    @staticmethod
+    def _history_point(
+        history: Deque[Dict[str, float]],
+        target_timestamp: float,
+    ) -> Optional[Dict[str, float]]:
+        for point in reversed(
+            history
+        ):
+            if (
+                point["timestamp"]
+                <= target_timestamp
+            ):
+                return point
+
+        return None
+
+    def _add_history_and_momentum(
+        self,
+        row: Dict[str, Any],
+        now_ts: float,
+    ) -> Dict[str, Any]:
+        symbol = row[
+            "symbol"
+        ]
+
+        history = self.history[
+            symbol
+        ]
+
+        ltp = _num(
+            row.get(
+                "ltp"
+            )
+        )
+
+        volume = _num(
+            row.get(
+                "volume"
+            ),
+            0.0,
+        )
+
+        if ltp is None:
+            return row
+
+        if (
+            not history
+            or (
+                now_ts
+                - history[-1][
+                    "timestamp"
+                ]
+            ) >= 5
+        ):
+            history.append(
+                {
+                    "timestamp":
+                        now_ts,
+
+                    "ltp":
+                        ltp,
+
+                    "volume":
+                        (
+                            volume
+                            if volume
+                            is not None
+                            else 0.0
+                        ),
+                }
+            )
+
+        p1 = self._history_point(
+            history,
+            now_ts - 60,
+        )
+
+        p5 = self._history_point(
+            history,
+            now_ts - 300,
+        )
+
+        p15 = self._history_point(
+            history,
+            now_ts - 900,
+        )
+
+        change_1m = _pct(
+            ltp,
+            (
+                p1.get(
+                    "ltp"
+                )
+                if p1
+                else None
+            ),
+        )
+
+        change_5m = _pct(
+            ltp,
+            (
+                p5.get(
+                    "ltp"
+                )
+                if p5
+                else None
+            ),
+        )
+
+        change_15m = _pct(
+            ltp,
+            (
+                p15.get(
+                    "ltp"
+                )
+                if p15
+                else None
+            ),
+        )
+
+        volume_delta_1m = (
+            volume
+            - p1.get(
+                "volume",
+                0,
+            )
+            if (
+                p1 is not None
+                and volume is not None
+            )
+            else None
+        )
+
+        volume_delta_5m = (
+            volume
+            - p5.get(
+                "volume",
+                0,
+            )
+            if (
+                p5 is not None
+                and volume is not None
+            )
+            else None
+        )
+
+        day_change = _num(
+            row.get(
+                "day_change_pct"
+            ),
+            0.0,
+        ) or 0.0
+
+        # This is a discovery score only.
+        #
+        # Short-term movement receives the
+        # largest weight. Day change is used
+        # mainly during warm-up.
+        score = 0.0
+
+        if change_1m is not None:
+            score += (
+                change_1m
+                * 32.0
+            )
+
+        if change_5m is not None:
+            score += (
+                change_5m
+                * 22.0
+            )
+
+        if change_15m is not None:
+            score += (
+                change_15m
+                * 10.0
+            )
+
+        score += (
+            day_change
+            * 2.5
+        )
+
+        if (
+            change_5m is not None
+            and change_5m > 0.15
+            and score > 0
+        ):
+            state = (
+                "RISING"
+            )
+
+        elif (
+            change_5m is not None
+            and change_5m < -0.15
+            and score < 0
+        ):
+            state = (
+                "FALLING"
+            )
+
+        elif score > 2:
+            state = (
+                "RISING"
+            )
+
+        elif score < -2:
+            state = (
+                "FALLING"
+            )
+
+        else:
+            state = (
+                "NEUTRAL"
+            )
+
+        output = dict(
+            row
+        )
+
+        output.update(
+            {
+                "change_1m_pct":
+                    (
+                        round(
+                            change_1m,
+                            3,
+                        )
+                        if change_1m
+                        is not None
+                        else None
+                    ),
+
+                "change_5m_pct":
+                    (
+                        round(
+                            change_5m,
+                            3,
+                        )
+                        if change_5m
+                        is not None
+                        else None
+                    ),
+
+                "change_15m_pct":
+                    (
+                        round(
+                            change_15m,
+                            3,
+                        )
+                        if change_15m
+                        is not None
+                        else None
+                    ),
+
+                "volume_delta_1m":
+                    (
+                        round(
+                            volume_delta_1m,
+                            2,
+                        )
+                        if volume_delta_1m
+                        is not None
+                        else None
+                    ),
+
+                "volume_delta_5m":
+                    (
+                        round(
+                            volume_delta_5m,
+                            2,
+                        )
+                        if volume_delta_5m
+                        is not None
+                        else None
+                    ),
+
+                "momentum_score":
+                    round(
+                        score,
+                        2,
+                    ),
+
+                "momentum_state":
+                    state,
+            }
+        )
+
+        return output
+
+    async def scan(
+        self,
+        session: AsyncSession,
+        market: Any,
+    ) -> Dict[str, Any]:
+        async with self.lock:
+            now_mono = (
+                time.monotonic()
+            )
+
+            if (
+                self.last_result
+                is not None
+                and (
+                    now_mono
+                    - self.last_scan_time
+                )
+                < self.scan_cache_seconds
+            ):
+                return self.last_result
+
+            needs_universe = (
+                not self.dynamic_universe
+                or (
+                    now_mono
+                    - self.last_universe_refresh
+                )
+                > self.universe_refresh_seconds
+            )
+
+            if needs_universe:
+                await self._refresh_dynamic_universe(
+                    session,
+                    market,
+                )
+
+            quotes = (
+                await self._fetch_quotes(
+                    market,
+                    self.dynamic_universe,
+                )
+            )
+
+            now_ts = (
+                datetime.now(
+                    timezone.utc
+                ).timestamp()
+            )
+
+            rows = []
+
+            for quote in quotes:
+                row = (
+                    self._normalize_quote(
+                        quote
+                    )
+                )
+
+                if row is None:
+                    continue
+
+                row = (
+                    self._add_history_and_momentum(
+                        row,
+                        now_ts,
+                    )
+                )
+
+                rows.append(
+                    row
+                )
+
+            rising = sorted(
+                [
+                    row
+                    for row in rows
+                    if row[
+                        "momentum_state"
+                    ] == "RISING"
+                ],
+                key=lambda row:
+                    row.get(
+                        "momentum_score",
+                        0,
+                    ),
+                reverse=True,
+            )
+
+            falling = sorted(
+                [
+                    row
+                    for row in rows
+                    if row[
+                        "momentum_state"
+                    ] == "FALLING"
+                ],
+                key=lambda row:
+                    row.get(
+                        "momentum_score",
+                        0,
+                    ),
+            )
+
+            gainers = sorted(
+                rows,
+                key=lambda row:
+                    row.get(
+                        "day_change_pct",
+                        -999,
+                    )
+                    if row.get(
+                        "day_change_pct"
+                    )
+                    is not None
+                    else -999,
+                reverse=True,
+            )
+
+            losers = sorted(
+                rows,
+                key=lambda row:
+                    row.get(
+                        "day_change_pct",
+                        999,
+                    )
+                    if row.get(
+                        "day_change_pct"
+                    )
+                    is not None
+                    else 999,
+            )
+
+            volume_activity = sorted(
+                rows,
+                key=lambda row:
+                    (
+                        row.get(
+                            "volume_delta_1m"
+                        )
+                        if row.get(
+                            "volume_delta_1m"
+                        )
+                        is not None
+                        else -1
+                    ),
+                reverse=True,
+            )
+
+            strongest = sorted(
+                rows,
+                key=lambda row:
+                    abs(
+                        row.get(
+                            "momentum_score",
+                            0,
+                        )
+                    ),
+                reverse=True,
+            )
+
+            result = {
+                "status":
+                    "READY",
+
+                "generated_at":
+                    datetime.now(
+                        timezone.utc
+                    ).isoformat(),
+
+                "source":
+                    "SMARTAPI_FULL_MARKET",
+
+                "instrument_scope":
+                    "NSE_EQUITY",
+
+                "dynamic_universe_size":
+                    len(
+                        self.dynamic_universe
+                    ),
+
+                "quoted_count":
+                    len(
+                        rows
+                    ),
+
+                "history_note":
+                    (
+                        "1m/5m/15m momentum builds "
+                        "after scanner starts."
+                    ),
+
+                "rising":
+                    rising[:50],
+
+                "falling":
+                    falling[:50],
+
+                "gainers":
+                    gainers[:50],
+
+                "losers":
+                    losers[:50],
+
+                "volume_activity":
+                    volume_activity[:50],
+
+                "strongest":
+                    strongest[:100],
+            }
+
+            self.last_result = (
+                result
+            )
+
+            self.last_scan_time = (
+                time.monotonic()
+            )
+
+            return result
+
+
+FULL_MARKET_SCANNER = (
+    FullMarketMomentumScanner()
+)

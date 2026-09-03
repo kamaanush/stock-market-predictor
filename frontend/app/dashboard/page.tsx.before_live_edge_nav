@@ -14,8 +14,6 @@ import StockLoader from "../../components/StockLoader";
 import OverviewPanel from "../../components/dashboard/OverviewPanel";
 import ScannerPanel from "../../components/dashboard/ScannerPanel";
 import MarketRadarPanel from "../../components/dashboard/MarketRadarPanel";
-import FullMarketScannerPanel from "../../components/dashboard/FullMarketScannerPanel";
-import LiveEdgePanel from "../../components/dashboard/LiveEdgePanel";
 import BacktestPanel from "../../components/dashboard/BacktestPanel";
 
 type LiveStock = {
@@ -66,8 +64,6 @@ type WatchlistItem = {
 type DashboardView =
   | "overview"
   | "radar"
-  | "marketscanner"
-  | "liveedge"
   | "scanner"
   | "watchlist"
   | "portfolio"
@@ -373,41 +369,6 @@ export default function Dashboard() {
     activeView,
     setActiveView,
   ] = useState<DashboardView>("overview");
-
-  const [
-    sidebarOpen,
-    setSidebarOpen,
-  ] = useState(true);
-
-
-
-  // NEXUS_LIVE_EDGE_QUERY_VIEW
-  useEffect(() => {
-    const params =
-      new URLSearchParams(
-        window.location.search
-      );
-
-    if (
-      params.get("view") ===
-      "liveedge"
-    ) {
-      setActiveView(
-        "liveedge"
-      );
-
-      setSidebarOpen(
-        false
-      );
-
-      window.history
-        .replaceState(
-          {},
-          "",
-          "/dashboard"
-        );
-    }
-  }, []);
 
   const [
     searchQuery,
@@ -3552,13 +3513,7 @@ export default function Dashboard() {
   // ==================================================
 
   return (
-    <main
-      className={
-        sidebarOpen
-          ? "terminal sidebar-expanded"
-          : "terminal sidebar-collapsed"
-      }
-    >
+    <main className="terminal">
 
       {/* ==========================================
         FULL SCREEN STOCK CHART
@@ -3862,45 +3817,7 @@ export default function Dashboard() {
           SIDEBAR
       ================================================= */}
 
-      <aside
-        className={
-          sidebarOpen
-            ? "sidebar sidebar-expanded"
-            : "sidebar sidebar-collapsed"
-        }
-        onMouseEnter={() =>
-          setSidebarOpen(true)
-        }
-        onMouseLeave={() =>
-          setSidebarOpen(false)
-        }
-      >
-
-        <button
-          type="button"
-          className="sidebar-toggle"
-          onClick={(event) => {
-            event.stopPropagation();
-
-            setSidebarOpen(
-              (current) => !current
-            );
-          }}
-          title={
-            sidebarOpen
-              ? "Collapse sidebar"
-              : "Open sidebar"
-          }
-          aria-label={
-            sidebarOpen
-              ? "Collapse sidebar"
-              : "Open sidebar"
-          }
-        >
-          {sidebarOpen
-            ? "‹"
-            : "›"}
-        </button>
+      <aside className="sidebar">
 
         <div className="logo">
 
@@ -3974,15 +3891,10 @@ export default function Dashboard() {
                     title
                   }
                   onClick={
-                    () => {
+                    () =>
                       handleNavigation(
                         title
-                      );
-
-                      setSidebarOpen(
-                        false
-                      );
-                    }
+                      )
                   }
                   className={
                     activeView ===
@@ -4020,81 +3932,7 @@ export default function Dashboard() {
             }
           )}
 
-        
-          <button
-            type="button"
-            onClick={() => {
-              setSidebarOpen(
-                false
-              );
-
-              setActiveView("liveedge");
-            }}
-            className={
-              activeView ===
-              "liveedge"
-                ? "nav-item active"
-                : "nav-item"
-            }
-          >
-            <span className="nav-icon">
-              ⚡
-            </span>
-
-            <span className="nav-copy">
-              <strong>
-                LIVE EDGE
-              </strong>
-
-              <small>
-                Intraday Opportunities
-              </small>
-            </span>
-
-            <span className="nav-arrow">
-              ›
-            </span>
-          </button>
-
-
-          <button
-            type="button"
-            onClick={() => {
-              setActiveView(
-                "marketscanner"
-              );
-
-              setSidebarOpen(
-                false
-              );
-            }}
-            className={
-              activeView ===
-              "marketscanner"
-                ? "nav-item active"
-                : "nav-item"
-            }
-          >
-            <span className="nav-icon">
-              ▤
-            </span>
-
-            <span className="nav-copy">
-              <strong>
-                FULL MARKET SCANNER
-              </strong>
-
-              <small>
-                NSE Momentum Sheet
-              </small>
-            </span>
-
-            <span className="nav-arrow">
-              ›
-            </span>
-          </button>
-
-</nav>
+        </nav>
 
 
         <div className="ai-core">
@@ -4370,14 +4208,6 @@ export default function Dashboard() {
               setActiveView("watchlist");
             }}
           />
-        )}
-
-        {activeView === "liveedge" && (
-          <LiveEdgePanel />
-        )}
-
-        {activeView === "marketscanner" && (
-          <FullMarketScannerPanel />
         )}
 
         {activeView === "backtest" && (

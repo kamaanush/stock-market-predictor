@@ -68,18 +68,6 @@ from .services.backtester import (
 )
 from .services.live_market import LiveMarketTracker
 from .services.live_candles import LiveCandleEngine
-from .services.live_warmup import (
-    warm_live_candles as _warm_live_candles_original,
-)
-
-# FULL_MARKET_SCANNER_RATE_LIMIT_GUARD_V1
-# Temporarily prevent historical candle warmup from
-# competing with the complete NSE SmartAPI quote scan.
-async def warm_live_candles(*args, **kwargs):
-    return {
-        "status": "DISABLED_FOR_FULL_MARKET_SCANNER"
-    }
-
 from .services.fast_scanner import (
     build_fast_scan_snapshot,
 )
@@ -186,8 +174,6 @@ async def lifespan(app: FastAPI):
         )
     )
 
-    app.state.live_warmup_task = None
-
     app.state.fast_scan_snapshot = {
         "generated_at": None,
         "live_count": 0,
@@ -223,36 +209,6 @@ async def lifespan(app: FastAPI):
             "SmartAPI connection failed; "
             "using demo market data. "
             f"{exc}"
-        )
-
-    # FULL_MARKET_SCANNER_STARTUP_V1
-    # Start the COMPLETE NSE equity scanner after:
-    # 1. Angel instrument master is refreshed
-    # 2. SmartAPI market client is authenticated
-    #
-    # This is independent of the old ~230-stock websocket scanner.
-
-    try:
-        from .services.full_market_momentum import (
-            FULL_MARKET_SCANNER,
-        )
-
-        await FULL_MARKET_SCANNER.ensure_started(
-            app
-        )
-
-        print(
-            "[FULL MARKET SCANNER] STARTUP READY:",
-            len(
-                FULL_MARKET_SCANNER.instruments
-            ),
-            "NSE equities",
-        )
-
-    except Exception as exc:
-        print(
-            "[FULL MARKET SCANNER] STARTUP FAILED:",
-            repr(exc),
         )
 
     # -------------------------------------------------
@@ -407,26 +363,6 @@ async def lifespan(app: FastAPI):
                     live_market
                 )
 
-                # -----------------------------------------
-                # HISTORICAL WARMUP + REPLAY PERSISTENCE
-                # -----------------------------------------
-
-                app.state.live_warmup_task = (
-                    asyncio.create_task(
-                        warm_live_candles(
-                            market=market_client,
-                            engine=(
-                                app.state
-                                .live_candles
-                            ),
-                            instruments=(
-                                watchlist
-                            ),
-                            concurrency=3,
-                        )
-                    )
-                )
-
                 print(
                     "V1.8 LIVE MARKET STARTED:",
                     len(watchlist),
@@ -467,15 +403,10 @@ async def lifespan(app: FastAPI):
         )
     )
 
-    # FULL_MARKET_DISABLE_DEEP_SCANNER_V1
-    # Temporarily park the 15m deep scanner while the
-    # complete NSE SmartAPI market scanner is running.
-    # This prevents historical candle API rate-limit
-    # contention. Fast WebSocket scanner remains active.
     deep_scanner_worker = (
         asyncio.create_task(
-            asyncio.sleep(
-                10 ** 9
+            deep_scanner_worker_loop(
+                app
             )
         )
     )
@@ -493,23 +424,6 @@ async def lifespan(app: FastAPI):
 
         if live_market is not None:
             live_market.stop()
-
-        warmup_task = getattr(
-            app.state,
-            "live_warmup_task",
-            None,
-        )
-
-        if (
-            warmup_task is not None
-            and not warmup_task.done()
-        ):
-            warmup_task.cancel()
-
-            with suppress(
-                asyncio.CancelledError
-            ):
-                await warmup_task
 
         alert_worker.cancel()
         instrument_master_worker.cancel()
@@ -5288,13 +5202,3 @@ async def market_socket(
 
     except WebSocketDisconnect:
         return
-
-
-# FULL_MARKET_SCANNER_V1
-from .full_market_scanner_api import (
-    router as full_market_scanner_router,
-)
-
-app.include_router(
-    full_market_scanner_router
-)

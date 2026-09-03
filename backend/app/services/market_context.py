@@ -61,33 +61,363 @@ def _window_return(
     )
 
 
-def analyze_relative_strength(
-    *,
-    stock_candles: list[dict[str, Any]],
-    benchmark_candles: list[dict[str, Any]] | None,
-) -> dict[str, Any]:
+def _minute_timestamp(
+    candle: dict[str, Any],
+) -> int | None:
     """
-    Market-relative strength.
+    Normalize a candle timestamp to its
+    1-minute bucket.
+    """
 
-    IMPORTANT:
-    This is NOT RSI.
+    raw = candle.get(
+        "time"
+    )
 
-    It compares a stock's return with the benchmark's return over
-    the same 1m, 3m and 5m windows.
+    if raw is None:
+        return None
+
+    try:
+        if isinstance(
+            raw,
+            str,
+        ):
+            from datetime import datetime
+
+            timestamp = (
+                datetime.fromisoformat(
+                    raw.replace(
+                        "Z",
+                        "+00:00",
+                    )
+                ).timestamp()
+            )
+
+        else:
+            timestamp = float(
+                raw
+            )
+
+            if (
+                timestamp
+                > 10_000_000_000
+            ):
+                timestamp /= 1000.0
+
+    except (
+        TypeError,
+        ValueError,
+    ):
+        return None
+
+    return (
+        int(timestamp)
+        // 60
+        * 60
+    )
+
+
+def _aligned_close_pairs(
+    stock_candles: list[
+        dict[str, Any]
+    ],
+    benchmark_candles: list[
+        dict[str, Any]
+    ],
+) -> tuple[
+    list[
+        tuple[
+            int,
+            float,
+            float,
+        ]
+    ],
+    float,
+]:
+    """
+    Match stock and NIFTY candles using
+    the exact same minute timestamps.
+    """
+
+    stock_map: dict[
+        int,
+        float,
+    ] = {}
+
+    benchmark_map: dict[
+        int,
+        float,
+    ] = {}
+
+    for candle in stock_candles:
+        timestamp = (
+            _minute_timestamp(
+                candle
+            )
+        )
+
+        close = safe_float(
+            candle.get(
+                "close"
+            )
+        )
+
+        if (
+            timestamp is not None
+            and close > 0
+        ):
+            stock_map[
+                timestamp
+            ] = close
+
+    for candle in benchmark_candles:
+        timestamp = (
+            _minute_timestamp(
+                candle
+            )
+        )
+
+        close = safe_float(
+            candle.get(
+                "close"
+            )
+        )
+
+        if (
+            timestamp is not None
+            and close > 0
+        ):
+            benchmark_map[
+                timestamp
+            ] = close
+
+    common = sorted(
+        set(
+            stock_map
+        )
+        & set(
+            benchmark_map
+        )
+    )
+
+    pairs = [
+        (
+            timestamp,
+            stock_map[
+                timestamp
+            ],
+            benchmark_map[
+                timestamp
+            ],
+        )
+        for timestamp in common
+    ]
+
+    if not common:
+        return (
+            pairs,
+            999.0,
+        )
+
+    latest_stock = max(
+        stock_map,
+        default=common[-1],
+    )
+
+    latest_benchmark = max(
+        benchmark_map,
+        default=common[-1],
+    )
+
+    latest_common = (
+        common[-1]
+    )
+
+    alignment_lag = max(
+        (
+            latest_stock
+            - latest_common
+        )
+        / 60.0,
+        (
+            latest_benchmark
+            - latest_common
+        )
+        / 60.0,
+    )
+
+    return (
+        pairs,
+        alignment_lag,
+    )
+
+
+def _latest_contiguous_pairs(
+    pairs: list[
+        tuple[
+            int,
+            float,
+            float,
+        ]
+    ],
+) -> list[
+    tuple[
+        int,
+        float,
+        float,
+    ]
+]:
+    """
+    Keep only the newest uninterrupted
+    sequence of true 1-minute aligned bars.
 
     Example:
-      stock 5m = +0.80%
-      NIFTY 5m = +0.20%
-      RS 5m    = +0.60%
+        15:18
+        15:19
+        15:20
+        15:21
+        15:22
 
-    Positive = stock outperforming NIFTY.
-    Negative = stock underperforming NIFTY.
+    A gap such as 15:18 -> 15:21 breaks
+    the sequence instead of treating it
+    like one 1-minute move.
     """
-    benchmark = benchmark_candles or []
 
+    if not pairs:
+        return []
+
+    contiguous = [
+        pairs[-1]
+    ]
+
+    for index in range(
+        len(pairs) - 2,
+        -1,
+        -1,
+    ):
+        newer_time = (
+            contiguous[-1][0]
+        )
+
+        older_time = (
+            pairs[index][0]
+        )
+
+        if (
+            newer_time
+            - older_time
+            != 60
+        ):
+            break
+
+        contiguous.append(
+            pairs[index]
+        )
+
+    contiguous.reverse()
+
+    return contiguous
+
+
+
+def _pair_return(
+    pairs: list[
+        tuple[
+            int,
+            float,
+            float,
+        ]
+    ],
+    bars: int,
+) -> tuple[
+    float,
+    float,
+]:
+    """
+    Calculate stock and benchmark returns
+    across exactly the same aligned bars.
+    """
+
+    if len(pairs) < 2:
+        return (
+            0.0,
+            0.0,
+        )
+
+    usable_bars = min(
+        max(
+            int(bars),
+            1,
+        ),
+        len(pairs) - 1,
+    )
+
+    previous = pairs[
+        -(usable_bars + 1)
+    ]
+
+    current = pairs[-1]
+
+    stock_return = (
+        percent_change(
+            current[1],
+            previous[1],
+        )
+    )
+
+    benchmark_return = (
+        percent_change(
+            current[2],
+            previous[2],
+        )
+    )
+
+    return (
+        stock_return,
+        benchmark_return,
+    )
+
+
+def analyze_relative_strength(
+    *,
+    stock_candles: list[
+        dict[str, Any]
+    ],
+    benchmark_candles: list[
+        dict[str, Any]
+    ] | None,
+) -> dict[str, Any]:
+    """
+    Stock strength relative to NIFTY 50.
+
+    Stock and benchmark candles are first
+    aligned by their 1-minute timestamps.
+
+    This is NOT RSI.
+    """
+
+    benchmark = (
+        benchmark_candles
+        or []
+    )
+
+    pairs, alignment_lag = (
+        _aligned_close_pairs(
+            stock_candles,
+            benchmark,
+        )
+    )
+
+    pairs = (
+        _latest_contiguous_pairs(
+            pairs
+        )
+    )
+
+    # We need enough common candles and
+    # reasonably fresh overlap.
     if (
-        len(stock_candles) < 2
-        or len(benchmark) < 2
+        len(pairs) < 6
+        or alignment_lag > 2.0
     ):
         return {
             "available": False,
@@ -99,37 +429,53 @@ def analyze_relative_strength(
             "persistence": "UNKNOWN",
             "direction": "NEUTRAL",
             "strength": 0.0,
+            "aligned_points": len(
+                pairs
+            ),
+            "alignment_lag_minutes": round(
+                alignment_lag,
+                2,
+            ),
         }
 
-    stock_1m = _window_return(
-        stock_candles,
+    (
+        stock_1m,
+        benchmark_1m,
+    ) = _pair_return(
+        pairs,
         1,
     )
-    stock_3m = _window_return(
-        stock_candles,
+
+    (
+        stock_3m,
+        benchmark_3m,
+    ) = _pair_return(
+        pairs,
         3,
     )
-    stock_5m = _window_return(
-        stock_candles,
+
+    (
+        stock_5m,
+        benchmark_5m,
+    ) = _pair_return(
+        pairs,
         5,
     )
 
-    benchmark_1m = _window_return(
-        benchmark,
-        1,
-    )
-    benchmark_3m = _window_return(
-        benchmark,
-        3,
-    )
-    benchmark_5m = _window_return(
-        benchmark,
-        5,
+    rs_1m = (
+        stock_1m
+        - benchmark_1m
     )
 
-    rs_1m = stock_1m - benchmark_1m
-    rs_3m = stock_3m - benchmark_3m
-    rs_5m = stock_5m - benchmark_5m
+    rs_3m = (
+        stock_3m
+        - benchmark_3m
+    )
+
+    rs_5m = (
+        stock_5m
+        - benchmark_5m
+    )
 
     positive_count = sum(
         value > 0.03
@@ -162,23 +508,17 @@ def analyze_relative_strength(
         direction = "BEARISH"
 
     elif positive_count >= 2:
-        persistence = (
-            "IMPROVING"
-        )
+        persistence = "IMPROVING"
         direction = "BULLISH"
 
     elif negative_count >= 2:
-        persistence = (
-            "WEAKENING"
-        )
+        persistence = "WEAKENING"
         direction = "BEARISH"
 
     else:
         persistence = "MIXED"
         direction = "NEUTRAL"
 
-    # Weighted toward the longer 5-minute comparison, but still
-    # detects recent acceleration/deceleration.
     strength = (
         rs_1m * 0.20
         + rs_3m * 0.30
@@ -187,33 +527,385 @@ def analyze_relative_strength(
 
     return {
         "available": True,
+
         "rs_1m_pct": round(
             rs_1m,
             4,
         ),
+
         "rs_3m_pct": round(
             rs_3m,
             4,
         ),
+
         "rs_5m_pct": round(
             rs_5m,
             4,
         ),
+
         "stock_5m_pct": round(
             stock_5m,
             4,
         ),
+
         "benchmark_5m_pct": round(
             benchmark_5m,
             4,
         ),
-        "persistence": persistence,
-        "direction": direction,
+
+        "persistence":
+            persistence,
+
+        "direction":
+            direction,
+
         "strength": round(
             strength,
             4,
         ),
+
+        "aligned_points": len(
+            pairs
+        ),
+
+        "alignment_lag_minutes": round(
+            alignment_lag,
+            2,
+        ),
+
+        "latest_aligned_time":
+            pairs[-1][0],
     }
+
+
+def analyze_rs_acceleration(
+    *,
+    stock_candles: list[
+        dict[str, Any]
+    ],
+    benchmark_candles: list[
+        dict[str, Any]
+    ] | None,
+    lookback: int = 6,
+) -> dict[str, Any]:
+    """
+    Measure genuine stock-vs-NIFTY
+    relative-strength acceleration.
+
+    Requirements:
+    - timestamps aligned
+    - consecutive 1-minute candles
+    - RS slope moving in the same direction
+    - acceleration itself must confirm
+      the direction
+
+    This remains a ranking feature,
+    not a trade signal.
+    """
+
+    benchmark = (
+        benchmark_candles
+        or []
+    )
+
+    pairs, alignment_lag = (
+        _aligned_close_pairs(
+            stock_candles,
+            benchmark,
+        )
+    )
+
+    pairs = (
+        _latest_contiguous_pairs(
+            pairs
+        )
+    )
+
+    minimum_points = 6
+
+    if (
+        len(pairs)
+        < minimum_points
+        or alignment_lag > 2.0
+    ):
+        return {
+            "available": False,
+            "classification": "UNKNOWN",
+            "direction": "NEUTRAL",
+            "rs_change_3m": 0.0,
+            "recent_slope": 0.0,
+            "previous_slope": 0.0,
+            "acceleration": 0.0,
+            "consistency": 0.0,
+            "quality": 0.0,
+            "latest_rs": 0.0,
+            "contiguous_points": len(
+                pairs
+            ),
+        }
+
+    pairs = pairs[
+        -max(
+            minimum_points,
+            int(lookback),
+        ):
+    ]
+
+    base_stock = (
+        pairs[0][1]
+    )
+
+    base_benchmark = (
+        pairs[0][2]
+    )
+
+    rs_curve = []
+
+    for (
+        timestamp,
+        stock_close,
+        benchmark_close,
+    ) in pairs:
+
+        stock_return = (
+            percent_change(
+                stock_close,
+                base_stock,
+            )
+        )
+
+        benchmark_return = (
+            percent_change(
+                benchmark_close,
+                base_benchmark,
+            )
+        )
+
+        rs_curve.append(
+            {
+                "time": timestamp,
+
+                "rs": (
+                    stock_return
+                    - benchmark_return
+                ),
+            }
+        )
+
+    slopes = [
+        (
+            rs_curve[index]["rs"]
+            - rs_curve[
+                index - 1
+            ]["rs"]
+        )
+        for index
+        in range(
+            1,
+            len(rs_curve),
+        )
+    ]
+
+    # Smooth the slope rather than using
+    # one noisy final candle.
+    previous_window = (
+        slopes[-4:-2]
+    )
+
+    recent_window = (
+        slopes[-2:]
+    )
+
+    previous_slope = (
+        sum(
+            previous_window
+        )
+        / len(
+            previous_window
+        )
+    )
+
+    recent_slope = (
+        sum(
+            recent_window
+        )
+        / len(
+            recent_window
+        )
+    )
+
+    acceleration = (
+        recent_slope
+        - previous_slope
+    )
+
+    rs_change_3m = (
+        rs_curve[-1]["rs"]
+        - rs_curve[-4]["rs"]
+    )
+
+    recent_slopes = (
+        slopes[-3:]
+    )
+
+    bullish_steps = sum(
+        value > 0.01
+        for value
+        in recent_slopes
+    )
+
+    bearish_steps = sum(
+        value < -0.01
+        for value
+        in recent_slopes
+    )
+
+    bullish_consistency = (
+        bullish_steps
+        / len(
+            recent_slopes
+        )
+    )
+
+    bearish_consistency = (
+        bearish_steps
+        / len(
+            recent_slopes
+        )
+    )
+
+    classification = "MIXED"
+    direction = "NEUTRAL"
+
+    consistency = max(
+        bullish_consistency,
+        bearish_consistency,
+    )
+
+    if (
+        rs_change_3m >= 0.10
+        and recent_slope >= 0.025
+        and acceleration >= 0.015
+        and bullish_steps >= 2
+    ):
+        classification = (
+            "BULLISH_ACCELERATION"
+        )
+
+        direction = "BULLISH"
+
+        consistency = (
+            bullish_consistency
+        )
+
+    elif (
+        rs_change_3m <= -0.10
+        and recent_slope <= -0.025
+        and acceleration <= -0.015
+        and bearish_steps >= 2
+    ):
+        classification = (
+            "BEARISH_ACCELERATION"
+        )
+
+        direction = "BEARISH"
+
+        consistency = (
+            bearish_consistency
+        )
+
+    change_quality = min(
+        abs(
+            rs_change_3m
+        )
+        / 0.40,
+        1.0,
+    )
+
+    slope_quality = min(
+        abs(
+            recent_slope
+        )
+        / 0.15,
+        1.0,
+    )
+
+    acceleration_quality = min(
+        abs(
+            acceleration
+        )
+        / 0.10,
+        1.0,
+    )
+
+    quality = (
+        change_quality
+        * 0.40
+        + slope_quality
+        * 0.25
+        + acceleration_quality
+        * 0.20
+        + consistency
+        * 0.15
+    )
+
+    if classification == "MIXED":
+        quality *= 0.20
+
+    return {
+        "available": True,
+
+        "classification":
+            classification,
+
+        "direction":
+            direction,
+
+        "rs_change_3m": round(
+            rs_change_3m,
+            4,
+        ),
+
+        "recent_slope": round(
+            recent_slope,
+            4,
+        ),
+
+        "previous_slope": round(
+            previous_slope,
+            4,
+        ),
+
+        "acceleration": round(
+            acceleration,
+            4,
+        ),
+
+        "consistency": round(
+            consistency,
+            4,
+        ),
+
+        "quality": round(
+            max(
+                0.0,
+                min(
+                    quality,
+                    1.0,
+                ),
+            ),
+            4,
+        ),
+
+        "latest_rs": round(
+            rs_curve[-1]["rs"],
+            4,
+        ),
+
+        "contiguous_points":
+            len(pairs),
+    }
+
 
 
 def analyze_effort_vs_result(

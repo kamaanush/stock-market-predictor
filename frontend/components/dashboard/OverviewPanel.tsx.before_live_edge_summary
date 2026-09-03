@@ -2,7 +2,6 @@
 
 import { useMemo, type CSSProperties } from "react";
 import styles from "./OverviewPanel.module.css";
-import LiveEdgeSummaryCard from "./LiveEdgeSummaryCard";
 
 type LiveStock = {
   symbol: string;
@@ -231,8 +230,6 @@ export default function OverviewPanel({
 
   return (
     <>
-      <LiveEdgeSummaryCard />
-
 ß
 
       <section className={styles.shell} id="overview-section">

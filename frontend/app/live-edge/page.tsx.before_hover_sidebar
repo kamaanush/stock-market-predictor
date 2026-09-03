@@ -1,0 +1,981 @@
+"use client";
+
+import {
+  useCallback,
+  useEffect,
+  useState,
+} from "react";
+
+import OpportunityDetail from "../../components/live-edge/OpportunityDetail";
+
+
+const API_BASE =
+  "http://localhost:8000";
+
+
+type Opportunity = {
+  symbol: string;
+  ltp: number;
+  opportunity_score: number;
+  opportunity_state: string;
+  status: string;
+};
+
+
+type PaperCandidate = {
+  symbol: string;
+  ltp: number;
+  direction: string;
+
+  opportunity_score: number;
+  opportunity_state: string;
+
+  reclaim_quality: number;
+  reclaim_state: string;
+
+  context_setup: string;
+  context_direction: string;
+
+  structural_stop?: number | null;
+  structural_risk_percent?: number | null;
+};
+
+
+type EdgeSummary = {
+  mode: string;
+
+  ready_stocks: number;
+
+  opportunity_40_plus: number;
+  opportunity_50_plus: number;
+  opportunity_60_plus: number;
+
+  opposed_reclaim_candidates: number;
+
+  pending_paper_outcomes: number;
+
+  top_opportunities: Opportunity[];
+
+  paper_candidates: PaperCandidate[];
+};
+
+
+type FastScanResponse = {
+  generated_at?: string;
+
+  scored_count?: number;
+
+  experimental_edge_summary?: EdgeSummary;
+};
+
+
+function scoreClass(
+  score: number,
+) {
+
+  if (score >= 60) {
+    return (
+      "bg-red-500/15 " +
+      "text-red-300 " +
+      "border-red-500/30"
+    );
+  }
+
+  if (score >= 50) {
+    return (
+      "bg-orange-500/15 " +
+      "text-orange-300 " +
+      "border-orange-500/30"
+    );
+  }
+
+  if (score >= 40) {
+    return (
+      "bg-yellow-500/15 " +
+      "text-yellow-300 " +
+      "border-yellow-500/30"
+    );
+  }
+
+  return (
+    "bg-slate-500/10 " +
+    "text-slate-300 " +
+    "border-slate-500/20"
+  );
+}
+
+
+function directionClass(
+  direction: string,
+) {
+
+  if (direction === "BULLISH") {
+    return (
+      "bg-emerald-500/15 " +
+      "text-emerald-300 " +
+      "border-emerald-500/30"
+    );
+  }
+
+  if (direction === "BEARISH") {
+    return (
+      "bg-red-500/15 " +
+      "text-red-300 " +
+      "border-red-500/30"
+    );
+  }
+
+  return (
+    "bg-slate-500/10 " +
+    "text-slate-300 " +
+    "border-slate-500/20"
+  );
+}
+
+
+function MetricCard({
+  label,
+  value,
+  description,
+}: {
+  label: string;
+  value: string | number;
+  description?: string;
+}) {
+
+  return (
+    <div
+      className="
+        rounded-2xl
+        border
+        border-slate-800
+        bg-slate-900/70
+        p-5
+      "
+    >
+      <div
+        className="
+          text-sm
+          text-slate-400
+        "
+      >
+        {label}
+      </div>
+
+      <div
+        className="
+          mt-2
+          text-3xl
+          font-bold
+          text-white
+        "
+      >
+        {value}
+      </div>
+
+      {description && (
+        <div
+          className="
+            mt-2
+            text-xs
+            text-slate-500
+          "
+        >
+          {description}
+        </div>
+      )}
+    </div>
+  );
+}
+
+
+export default function LiveEdgePage() {
+
+  const [
+    data,
+    setData,
+  ] = useState<FastScanResponse | null>(
+    null,
+  );
+
+  const [
+    loading,
+    setLoading,
+  ] = useState(true);
+
+  const [
+    error,
+    setError,
+  ] = useState("");
+
+  const [
+    autoRefresh,
+    setAutoRefresh,
+  ] = useState(true);
+
+  const [
+    selectedOpportunity,
+    setSelectedOpportunity,
+  ] = useState<Opportunity | null>(
+    null,
+  );
+
+
+  const load = useCallback(
+    async () => {
+
+      try {
+
+        const response = await fetch(
+          "/api/live-edge",
+          {
+            cache: "no-store",
+            credentials: "include",
+          },
+        );
+
+        if (!response.ok) {
+
+          throw new Error(
+            `Fast scan failed: ${response.status}`,
+          );
+        }
+
+        const json =
+          await response.json();
+
+        setData(json);
+
+        setError("");
+
+      } catch (err) {
+
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Unable to load scanner",
+        );
+
+      } finally {
+
+        setLoading(false);
+      }
+
+    },
+    [],
+  );
+
+
+  useEffect(() => {
+
+    load();
+
+  }, [load]);
+
+
+  useEffect(() => {
+
+    if (!autoRefresh) {
+      return;
+    }
+
+    const timer = setInterval(
+      load,
+      5000,
+    );
+
+    return () => {
+      clearInterval(timer);
+    };
+
+  }, [
+    autoRefresh,
+    load,
+  ]);
+
+
+  const edge =
+    data?.experimental_edge_summary;
+
+
+  return (
+    <main
+      className="
+        min-h-screen
+        bg-slate-950
+        text-white
+      "
+    >
+      <div
+        className="
+          mx-auto
+          max-w-[1600px]
+          p-6
+          lg:p-8
+        "
+      >
+        {/* HEADER */}
+
+        <div
+          className="
+            mb-8
+            flex
+            flex-col
+            gap-4
+            lg:flex-row
+            lg:items-center
+            lg:justify-between
+          "
+        >
+          <div>
+
+            <div
+              className="
+                text-xs
+                font-semibold
+                uppercase
+                tracking-[0.25em]
+                text-cyan-400
+              "
+            >
+              Experimental Scanner
+            </div>
+
+            <h1
+              className="
+                mt-2
+                text-3xl
+                font-bold
+                lg:text-4xl
+              "
+            >
+              Live Edge Board
+            </h1>
+
+            <p
+              className="
+                mt-2
+                max-w-3xl
+                text-sm
+                text-slate-400
+              "
+            >
+              Movement Opportunity +
+              Opposed Reclaim paper
+              monitoring.
+              No automatic execution.
+            </p>
+
+          </div>
+
+
+          <div
+            className="
+              flex
+              items-center
+              gap-3
+            "
+          >
+            <button
+              onClick={() =>
+                setAutoRefresh(
+                  (value) => !value,
+                )
+              }
+              className="
+                rounded-xl
+                border
+                border-slate-700
+                bg-slate-900
+                px-4
+                py-2
+                text-sm
+              "
+            >
+              Auto refresh:
+              {" "}
+              {autoRefresh
+                ? "ON"
+                : "OFF"}
+            </button>
+
+            <button
+              onClick={load}
+              className="
+                rounded-xl
+                bg-cyan-500
+                px-4
+                py-2
+                text-sm
+                font-semibold
+                text-slate-950
+              "
+            >
+              Refresh
+            </button>
+          </div>
+        </div>
+
+
+        {error && (
+          <div
+            className="
+              mb-6
+              rounded-xl
+              border
+              border-red-500/30
+              bg-red-500/10
+              p-4
+              text-red-300
+            "
+          >
+            {error}
+          </div>
+        )}
+
+
+        {loading && !data && (
+          <div
+            className="
+              rounded-2xl
+              border
+              border-slate-800
+              bg-slate-900
+              p-8
+              text-slate-400
+            "
+          >
+            Loading Fast Scanner...
+          </div>
+        )}
+
+
+        {edge && (
+          <>
+            {/* SUMMARY */}
+
+            <div
+              className="
+                grid
+                gap-4
+                md:grid-cols-2
+                xl:grid-cols-6
+              "
+            >
+              <MetricCard
+                label="Stocks Ready"
+                value={
+                  edge.ready_stocks
+                }
+              />
+
+              <MetricCard
+                label="Opportunity 40+"
+                value={
+                  edge.opportunity_40_plus
+                }
+                description="Watchlist"
+              />
+
+              <MetricCard
+                label="Opportunity 50+"
+                value={
+                  edge.opportunity_50_plus
+                }
+                description="Priority"
+              />
+
+              <MetricCard
+                label="Opportunity 60+"
+                value={
+                  edge.opportunity_60_plus
+                }
+                description="High priority"
+              />
+
+              <MetricCard
+                label="Paper Candidates"
+                value={
+                  edge.opposed_reclaim_candidates
+                }
+                description="Experimental only"
+              />
+
+              <MetricCard
+                label="Pending Outcomes"
+                value={
+                  edge.pending_paper_outcomes
+                }
+                description="5m / 10m / 15m"
+              />
+            </div>
+
+
+            {/* PAPER CANDIDATES */}
+
+            <section
+              className="
+                mt-8
+                rounded-2xl
+                border
+                border-slate-800
+                bg-slate-900/60
+              "
+            >
+              <div
+                className="
+                  flex
+                  items-center
+                  justify-between
+                  border-b
+                  border-slate-800
+                  p-5
+                "
+              >
+                <div>
+
+                  <h2
+                    className="
+                      text-xl
+                      font-semibold
+                    "
+                  >
+                    Paper Candidates
+                  </h2>
+
+                  <p
+                    className="
+                      mt-1
+                      text-xs
+                      text-slate-400
+                    "
+                  >
+                    Opposed-reclaim
+                    research setup only.
+                  </p>
+
+                </div>
+
+                <span
+                  className="
+                    rounded-full
+                    border
+                    border-yellow-500/30
+                    bg-yellow-500/10
+                    px-3
+                    py-1
+                    text-xs
+                    text-yellow-300
+                  "
+                >
+                  PAPER ONLY
+                </span>
+              </div>
+
+
+              <div
+                className="
+                  overflow-x-auto
+                "
+              >
+                <table
+                  className="
+                    w-full
+                    min-w-[1050px]
+                    text-left
+                    text-sm
+                  "
+                >
+                  <thead
+                    className="
+                      text-xs
+                      uppercase
+                      text-slate-500
+                    "
+                  >
+                    <tr>
+                      <th className="p-4">
+                        Symbol
+                      </th>
+
+                      <th className="p-4">
+                        LTP
+                      </th>
+
+                      <th className="p-4">
+                        Direction
+                      </th>
+
+                      <th className="p-4">
+                        Opportunity
+                      </th>
+
+                      <th className="p-4">
+                        Reclaim
+                      </th>
+
+                      <th className="p-4">
+                        Context
+                      </th>
+
+                      <th className="p-4">
+                        Stop
+                      </th>
+
+                      <th className="p-4">
+                        Risk
+                      </th>
+                    </tr>
+                  </thead>
+
+
+                  <tbody>
+                    {edge.paper_candidates
+                      .length === 0 && (
+                      <tr>
+                        <td
+                          colSpan={8}
+                          className="
+                            p-8
+                            text-center
+                            text-slate-500
+                          "
+                        >
+                          No active paper
+                          candidates.
+                        </td>
+                      </tr>
+                    )}
+
+
+                    {edge.paper_candidates.map(
+                      (item) => (
+                        <tr
+                          key={
+                            `${item.symbol}-${item.direction}`
+                          }
+                          className="
+                            border-t
+                            border-slate-800/70
+                          "
+                        >
+                          <td
+                            className="
+                              p-4
+                              font-bold
+                              text-white
+                            "
+                          >
+                            {item.symbol}
+                          </td>
+
+                          <td className="p-4">
+                            ₹
+                            {Number(
+                              item.ltp,
+                            ).toFixed(2)}
+                          </td>
+
+                          <td className="p-4">
+                            <span
+                              className={`
+                                rounded-lg
+                                border
+                                px-2
+                                py-1
+                                text-xs
+                                font-semibold
+                                ${directionClass(
+                                  item.direction,
+                                )}
+                              `}
+                            >
+                              {
+                                item.direction
+                              }
+                            </span>
+                          </td>
+
+                          <td className="p-4">
+                            <span
+                              className={`
+                                rounded-lg
+                                border
+                                px-2
+                                py-1
+                                text-xs
+                                font-bold
+                                ${scoreClass(
+                                  item.opportunity_score,
+                                )}
+                              `}
+                            >
+                              {Number(
+                                item.opportunity_score,
+                              ).toFixed(1)}
+                            </span>
+                          </td>
+
+                          <td className="p-4">
+                            {Number(
+                              item.reclaim_quality,
+                            ).toFixed(2)}
+                          </td>
+
+                          <td
+                            className="
+                              p-4
+                              text-slate-300
+                            "
+                          >
+                            {
+                              item.context_setup
+                            }
+                          </td>
+
+                          <td className="p-4">
+                            {item.structural_stop
+                              ? `₹${Number(
+                                  item.structural_stop,
+                                ).toFixed(2)}`
+                              : "—"}
+                          </td>
+
+                          <td className="p-4">
+                            {item.structural_risk_percent
+                              != null
+                              ? `${Number(
+                                  item.structural_risk_percent,
+                                ).toFixed(
+                                  2,
+                                )}%`
+                              : "—"}
+                          </td>
+                        </tr>
+                      ),
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+
+            {/* TOP OPPORTUNITIES */}
+
+            <section
+              className="
+                mt-8
+                rounded-2xl
+                border
+                border-slate-800
+                bg-slate-900/60
+              "
+            >
+              <div
+                className="
+                  border-b
+                  border-slate-800
+                  p-5
+                "
+              >
+                <h2
+                  className="
+                    text-xl
+                    font-semibold
+                  "
+                >
+                  Top Movement Opportunities
+                </h2>
+
+                <p
+                  className="
+                    mt-1
+                    text-xs
+                    text-slate-400
+                  "
+                >
+                  Ranking movement potential,
+                  not predicted direction.
+                </p>
+              </div>
+
+
+              <div
+                className="
+                  grid
+                  gap-3
+                  p-5
+                  md:grid-cols-2
+                  xl:grid-cols-3
+                "
+              >
+                {edge.top_opportunities.map(
+                  (
+                    item,
+                    index,
+                  ) => (
+                    <div
+                      key={
+                        item.symbol
+                      }
+                      className="
+                        rounded-xl
+                        border
+                        border-slate-800
+                        bg-slate-950/70
+                        p-4
+                      "
+                    >
+                      <div
+                        className="
+                          flex
+                          items-start
+                          justify-between
+                        "
+                      >
+                        <div>
+
+                          <div
+                            className="
+                              text-xs
+                              text-slate-500
+                            "
+                          >
+                            #{index + 1}
+                          </div>
+
+                          <div
+                            className="
+                              mt-1
+                              text-lg
+                              font-bold
+                            "
+                          >
+                            {item.symbol}
+                          </div>
+
+                          <div
+                            className="
+                              mt-1
+                              text-sm
+                              text-slate-400
+                            "
+                          >
+                            ₹
+                            {Number(
+                              item.ltp,
+                            ).toFixed(2)}
+                          </div>
+
+                        </div>
+
+                        <span
+                          className={`
+                            rounded-xl
+                            border
+                            px-3
+                            py-2
+                            font-bold
+                            ${scoreClass(
+                              item.opportunity_score,
+                            )}
+                          `}
+                        >
+                          {Number(
+                            item.opportunity_score,
+                          ).toFixed(1)}
+                        </span>
+                      </div>
+
+                      <div
+                        className="
+                          mt-4
+                          text-xs
+                          text-slate-500
+                        "
+                      >
+                        {
+                          item.opportunity_state
+                        }
+                      </div>
+
+                      <button
+                        onClick={() =>
+                          setSelectedOpportunity(
+                            item,
+                          )
+                        }
+                        className="
+                          mt-4
+                          w-full
+                          rounded-lg
+                          border
+                          border-cyan-500/20
+                          bg-cyan-500/5
+                          px-3
+                          py-2
+                          text-xs
+                          font-semibold
+                          text-cyan-300
+                          hover:bg-cyan-500/10
+                        "
+                      >
+                        Why this stock?
+                      </button>
+                    </div>
+                  ),
+                )}
+              </div>
+            </section>
+
+
+            <div
+              className="
+                mt-5
+                text-right
+                text-xs
+                text-slate-600
+              "
+            >
+              Last scanner update:
+              {" "}
+              {
+                data?.generated_at ||
+                "unknown"
+              }
+            </div>
+          </>
+        )}
+
+
+        {!loading && !edge && !error && (
+          <div
+            className="
+              rounded-2xl
+              border
+              border-yellow-500/30
+              bg-yellow-500/10
+              p-6
+              text-yellow-200
+            "
+          >
+            Backend responded, but
+            experimental_edge_summary
+            is not present yet.
+          </div>
+        )}
+      </div>
+        {selectedOpportunity && (
+          <OpportunityDetail
+            item={selectedOpportunity}
+            onClose={() =>
+              setSelectedOpportunity(
+                null,
+              )
+            }
+          />
+        )}
+
+    </main>
+  );
+}
